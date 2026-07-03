@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Point Code Cross-Section</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  :root{
+    --bg:#0f1512; --panel:#16201b; --panel2:#1c2921; --line:#2a3b31;
+    --ink:#e9f2ec; --ink-dim:#9db3a6; --accent:#5fbf8a; --accent2:#e0a458;
+    --danger:#d9695a; --mono:'SF Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',system-ui,sans-serif;}
+  #app{display:flex;height:100vh;}
+  #map{flex:1;background:#0a0e0b;}
+  #panel{width:320px;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;}
+  .ph{padding:14px 16px;border-bottom:1px solid var(--line);}
+  .ph h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em;}
+  .ph p{margin:0;font-size:11.5px;color:var(--ink-dim);}
+  .sec{padding:12px 16px;border-bottom:1px solid var(--line);}
+  .sec h2{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin:0 0 8px;}
+  button{font-family:inherit;font-size:12px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+    padding:9px 10px;border-radius:6px;cursor:pointer;text-align:left;transition:.12s;width:100%;}
+  button:hover{border-color:var(--accent);}
+  button.active{background:var(--accent);color:#08130d;border-color:var(--accent);font-weight:600;}
+  button.danger:hover{border-color:var(--danger);}
+  .filebtn{display:block;width:100%;}
+  input[type=file]{display:none;}
+  select,input[type=text]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:7px 8px;border-radius:6px;font-size:12px;font-family:inherit;}
+  .row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+  .row label{font-size:11px;color:var(--ink-dim);width:100px;flex-shrink:0;}
+  .row input{width:70px;flex:none;}
+  #log{flex:1;overflow-y:auto;padding:10px 16px;font-family:var(--mono);font-size:11px;}
+  .entry{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:6px;}
+  .entry .k{color:var(--accent);font-weight:600;}
+  .entry .w{color:var(--accent2);}
+  .entry .del{float:right;color:var(--danger);cursor:pointer;font-size:10px;}
+  .hint{font-size:11px;color:var(--ink-dim);line-height:1.5;margin-top:6px;}
+  .badge{display:inline-block;background:var(--accent);color:#08130d;font-size:10px;font-weight:700;
+    padding:1px 6px;border-radius:4px;margin-left:4px;}
+  .foot{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:6px;}
+  .foot button{flex:1;text-align:center;}
+  .leaflet-container{background:#0a0e0b;}
+  .dim-label{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;
+    color:#fff;font-weight:700;font-size:12.5px;font-family:'Segoe UI',system-ui,sans-serif;
+    text-shadow:-1.5px -1.5px 2px #000,1.5px -1.5px 2px #000,-1.5px 1.5px 2px #000,1.5px 1.5px 2px #000,0 0 4px #000;
+    pointer-events:none;}
+  .dim-label::before{display:none!important;}
+  .pc-label{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;
+    color:#e0453a;font-weight:700;font-size:12px;font-family:'Segoe UI',system-ui,sans-serif;
+    text-shadow:-1px -1px 2px #fff,1px -1px 2px #fff,-1px 1px 2px #fff,1px 1px 2px #fff;pointer-events:none;}
+  .pc-label::before{display:none!important;}
+  .pc-tick-hit{position:absolute;left:50%;top:50%;width:22px;height:22px;margin-left:-11px;margin-top:-11px;border-radius:50%;cursor:grab;}
+  .pc-tick-hit:active{cursor:grabbing;}
+  .pc-tick-bar{position:absolute;left:50%;top:50%;width:4px;height:24px;margin-left:-2px;margin-top:-12px;
+    border:1px solid #000;border-radius:2px;box-shadow:0 0 3px rgba(0,0,0,.7);pointer-events:none;}
+  .pc-rotate-hit{width:26px;height:26px;border-radius:50%;background:#7ab8e0;border:2px solid #000;
+    box-shadow:0 0 4px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;
+    cursor:grab;}
+  .pc-rotate-hit:active{cursor:grabbing;}
+  .pc-list-item{display:flex;align-items:center;justify-content:space-between;gap:6px;
+    padding:6px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:4px;
+    font-size:11.5px;cursor:pointer;background:var(--panel2);}
+  .pc-list-item:hover{border-color:var(--accent);}
+  .pc-list-item.done{opacity:0.55;}
+  .pc-list-item .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .pc-list-item .code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <div id="panel">
+    <div class="ph">
+      <h1>Point Code Cross-Section</h1>
+      <p>Click a point code, drag its 4 edges to fit — auto-saves</p>
+    </div>
+
+    <div class="sec">
+      <h2>Find a point code</h2>
+      <div class="row" style="margin-bottom:0;">
+        <input type="text" id="searchInput" list="pcCodeOptions" placeholder="Type a point code…" style="flex:1;" onkeydown="if(event.key==='Enter') searchGo();"/>
+        <button style="width:auto;padding:8px 12px;" onclick="searchGo()">Go</button>
+      </div>
+      <datalist id="pcCodeOptions"></datalist>
+    </div>
+
+    <div class="sec">
+      <h2>Basemap</h2>
+      <div class="row"><label>Layer</label>
+        <select id="baseSelect" style="width:auto;flex:1;">
+          <option value="osm">OSM</option>
+          <option value="sat">Esri Satellite</option>
+          <option value="wms">BBMP WMS overlay</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Road network (required)</h2>
+      <label class="filebtn"><button onclick="document.getElementById('geojsonInput').click()">Upload GeoJSON or KML</button></label>
+      <input type="file" id="geojsonInput" accept=".geojson,.json,.kml"/>
+      <div class="hint">Load this before adding point codes — every guide snaps perpendicular to the nearest road line here. You must click within 60m of a road in this file.</div>
+    </div>
+
+    <div class="sec">
+      <h2>Point code list (optional)</h2>
+      <label class="filebtn"><button onclick="document.getElementById('pcListInput').click()">Upload point codes (GeoJSON or KML)</button></label>
+      <input type="file" id="pcListInput" accept=".geojson,.json,.kml"/>
+      <div class="hint">A file of Point features, each with an ID/code property. Once loaded, click any code below to generate its scale automatically — no manual naming needed. Without this file, you'll still be asked to type a code when adding one on the map.</div>
+      <div id="pcListContainer" style="display:none;margin-top:8px;">
+        <div class="row"><label style="width:auto;">Codes</label><span class="badge" id="pcListStatus">0/0</span></div>
+        <div id="pcList" style="max-height:180px;overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Point codes</h2>
+      <button id="mode-pc" onclick="toggleMode()">Add point code</button>
+      <div class="row" style="margin-top:10px;"><label>Guide length</label>
+        <input type="text" id="guideLen" value="30"/><span style="font-size:11px;color:var(--ink-dim);">m</span>
+      </div>
+      <div class="hint" id="pcHint">Click "Add point code", then click a spot on/near a loaded road (within 60m). A scale drops in automatically, perpendicular to that road. Drag any of the 4 ticks to slide it along the line (building edges extend/retract it, footpath edges adjust widths) — they can't go off-axis. If you need to rotate the whole thing, drag the blue circular handle. It saves itself as you go.</div>
+    </div>
+
+    <div class="sec">
+      <h2>Saved <span class="badge" id="savedCount">0</span></h2>
+      <button class="danger" onclick="clearAllSaved()">Clear all saved point codes</button>
+    </div>
+
+    <div id="log"></div>
+
+    <div class="foot">
+      <button onclick="exportData('geojson')">GeoJSON</button>
+      <button onclick="exportData('csv')">CSV</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const WMS_URL   = 'https://rdgis.karnataka.gov.in/geoserver/wms';
+const WMS_LAYER = 'BU_bbmp_U:BU_bbmp_U';
+
+const map = L.map('map', {zoomControl:true}).setView([13.0067, 77.5978], 17);
+
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:22, maxNativeZoom:19, attribution:'OSM'}).addTo(map);
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:22, maxNativeZoom:19, attribution:'Esri'});
+const wms = L.tileLayer.wms(WMS_URL, {layers: WMS_LAYER, format:'image/png', transparent:true, version:'1.1.1', maxZoom:22});
+
+document.getElementById('baseSelect').addEventListener('change', e=>{
+  [osm,sat,wms].forEach(l=>map.removeLayer(l));
+  if(e.target.value==='osm') osm.addTo(map);
+  if(e.target.value==='sat') sat.addTo(map);
+  if(e.target.value==='wms') wms.addTo(map);
+});
+
+// ---- KML -> GeoJSON (minimal, handles BBMP-style exports) ----
+function kmlToGeoJSON(kmlText){
+  const xml = new DOMParser().parseFromString(kmlText, 'text/xml');
+  const err = xml.querySelector('parsererror');
+  if(err) throw new Error('XML parse error: ' + err.textContent.slice(0,200));
+  function parseCoords(text){
+    return text.trim().split(/\s+/).map(pair=>{
+      const parts = pair.split(',').map(Number);
+      return parts.length >= 3 ? [parts[0], parts[1], parts[2]] : [parts[0], parts[1]];
+    });
+  }
+  function geomFromEl(el){
+    const tag = el.tagName;
+    if(tag === 'LineString'){ const c = el.querySelector('coordinates'); return c ? {type:'LineString', coordinates: parseCoords(c.textContent)} : null; }
+    if(tag === 'Point'){ const c = el.querySelector('coordinates'); return c ? {type:'Point', coordinates: parseCoords(c.textContent)[0]} : null; }
+    if(tag === 'Polygon'){
+      const outer = el.querySelector('outerBoundaryIs LinearRing coordinates');
+      if(!outer) return null;
+      const rings = [parseCoords(outer.textContent)];
+      el.querySelectorAll('innerBoundaryIs LinearRing coordinates').forEach(ic=>rings.push(parseCoords(ic.textContent)));
+      return {type:'Polygon', coordinates: rings};
+    }
+    if(tag === 'MultiGeometry'){
+      const geoms = Array.from(el.children).map(geomFromEl).filter(Boolean);
+      if(geoms.length===0) return null;
+      if(geoms.every(g=>g.type==='LineString')) return {type:'MultiLineString', coordinates: geoms.map(g=>g.coordinates)};
+      return {type:'GeometryCollection', geometries: geoms};
+    }
+    return null;
+  }
+  const features = [];
+  xml.querySelectorAll('Placemark').forEach(pm=>{
+    const props = {};
+    const nameEl = pm.querySelector(':scope > name');
+    if(nameEl) props.name = nameEl.textContent;
+    pm.querySelectorAll('SimpleData').forEach(sd=>{ props[sd.getAttribute('name')] = sd.textContent; });
+    const geomEl = pm.querySelector('LineString, Point, Polygon, MultiGeometry');
+    if(!geomEl) return;
+    const geometry = geomFromEl(geomEl);
+    if(!geometry) return;
+    features.push({type:'Feature', properties: props, geometry});
+  });
+  return {type:'FeatureCollection', features};
+}
+
+let roadLayer = null;
+document.getElementById('geojsonInput').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const isKML = /\.kml$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    try{
+      const gj = isKML ? kmlToGeoJSON(ev.target.result) : JSON.parse(ev.target.result);
+      if(gj.features.length === 0) throw new Error('No usable features found in file.');
+      if(roadLayer) map.removeLayer(roadLayer);
+      roadLayer = L.geoJSON(gj, {
+        renderer: L.canvas({padding: 0.5}),
+        style: f => ({color: (f.properties && f.properties.Road_Class==='07') ? '#5a6b60' : '#e0a458', weight: 2, opacity: 0.85})
+      }).addTo(map);
+      map.fitBounds(roadLayer.getBounds());
+    }catch(err){ alert('Could not parse file: '+err.message); }
+  };
+  reader.readAsText(file);
+});
+
+// ---- local equirectangular meter conversion (accurate for short distances) ----
+function mPerDegLat(){ return 111320; }
+function mPerDegLng(lat){ return 111320 * Math.cos(lat * Math.PI/180); }
+function llToXY(latlng, originLat){ return {x: latlng.lng * mPerDegLng(originLat), y: latlng.lat * mPerDegLat()}; }
+function xyToLL(x, y, originLat){ return L.latLng(y / mPerDegLat(), x / mPerDegLng(originLat)); }
+
+function nearestPointOnRoads(clickLatLng, maxSnapM){
+  if(!roadLayer) return null;
+  const originLat = clickLatLng.lat;
+  const click = llToXY(clickLatLng, originLat);
+  let best = null;
+  roadLayer.eachLayer(layer=>{
+    let latlngsArr = layer.getLatLngs ? layer.getLatLngs() : null;
+    if(!latlngsArr) return;
+    let lines = Array.isArray(latlngsArr[0]) ? latlngsArr : [latlngsArr];
+    lines.forEach(line=>{
+      for(let i=0;i<line.length-1;i++){
+        const a = llToXY(line[i], originLat), b = llToXY(line[i+1], originLat);
+        const dx=b.x-a.x, dy=b.y-a.y, len2=dx*dx+dy*dy;
+        if(len2===0) continue;
+        let t = ((click.x-a.x)*dx + (click.y-a.y)*dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px=a.x+t*dx, py=a.y+t*dy, d=Math.hypot(click.x-px, click.y-py);
+        if(!best || d<best.dist){ const tlen=Math.hypot(dx,dy); best = {dist:d, x:px, y:py, tx:dx/tlen, ty:dy/tlen, props: layer.feature?layer.feature.properties:{}}; }
+      }
+    });
+  });
+  if(!best || best.dist > maxSnapM) return null;
+  return {point: xyToLL(best.x, best.y, originLat), tangent:{tx:best.tx, ty:best.ty}, originLat, props: best.props};
+}
+
+// ---- point-code cross-section: 4 independently draggable markers, live-redrawn dimension line ----
+const PC_LABELS = ['Building edge A','Footpath edge A','Footpath edge B','Building edge B'];
+const PC_COLORS = ['#e0a458','#5fbf8a','#5fbf8a','#e0a458'];
+const pcRegistry = {}; // pointCode -> {positions:[LatLng x4], markers:[], group, roadName}
+let pointCodeList = []; // [{code, latlng, status:'pending'|'done', properties}]
+
+const PC_CODE_KEYS = ['point_code','Point_Code','PointCode','pointcode','code','Code','ID','id','S_Code','SCode','name'];
+
+function extractPcCode(props, fallbackIndex){
+  for(const key of PC_CODE_KEYS){
+    if(props && props[key] !== undefined && String(props[key]).trim() !== '') return String(props[key]).trim();
+  }
+  return 'PC-' + (fallbackIndex+1);
+}
+
+document.getElementById('pcListInput').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const isKML = /\.kml$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    try{
+      const gj = isKML ? kmlToGeoJSON(ev.target.result) : JSON.parse(ev.target.result);
+      const points = gj.features.filter(f=>f.geometry && f.geometry.type==='Point');
+      if(points.length===0) throw new Error('No Point features found in this file.');
+      pointCodeList = points.map((f,i)=>({
+        code: extractPcCode(f.properties, i),
+        latlng: L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]),
+        status: pcRegistry[extractPcCode(f.properties, i)] ? 'done' : 'pending',
+        properties: f.properties || {}
+      }));
+      renderPcList();
+      document.getElementById('pcListContainer').style.display = 'block';
+      if(pointCodeList.length){
+        const bounds = L.latLngBounds(pointCodeList.map(p=>p.latlng));
+        map.fitBounds(bounds, {maxZoom:18});
+      }
+    }catch(err){ alert('Could not parse point code file: '+err.message); }
+  };
+  reader.readAsText(file);
+});
+
+function updateSearchDatalist(){
+  const dl = document.getElementById('pcCodeOptions');
+  const codes = new Set([...Object.keys(pcRegistry), ...pointCodeList.map(p=>p.code)]);
+  dl.innerHTML = [...codes].sort().map(c=>`<option value="${c.replace(/"/g,'&quot;')}">`).join('');
+}
+
+function flashPc(code){
+  const pc = pcRegistry[code];
+  if(!pc) return;
+  let n = 0;
+  const iv = setInterval(()=>{
+    pc.visualLayer.eachLayer(l=>{ if(l.setStyle) l.setStyle({opacity: n%2===0 ? 0.15 : 0.95}); });
+    n++;
+    if(n>5){ clearInterval(iv); redrawPc(code); }
+  }, 180);
+}
+
+function searchGo(){
+  const raw = document.getElementById('searchInput').value.trim();
+  if(!raw) return;
+  const lower = raw.toLowerCase();
+
+  // exact match in generated point codes first
+  let code = Object.keys(pcRegistry).find(c=>c.toLowerCase()===lower);
+  if(!code) code = Object.keys(pcRegistry).find(c=>c.toLowerCase().includes(lower));
+  if(code){
+    map.setView(pcRegistry[code].center, Math.max(map.getZoom(), 20));
+    flashPc(code);
+    return;
+  }
+
+  // fall back to the uploaded point-code list (not yet generated)
+  let entry = pointCodeList.find(p=>p.code.toLowerCase()===lower);
+  if(!entry) entry = pointCodeList.find(p=>p.code.toLowerCase().includes(lower));
+  if(entry){
+    map.setView(entry.latlng, Math.max(map.getZoom(), 19));
+    alert(`"${entry.code}" is in your point code list but hasn't been generated yet. Click it in the list, or click "Generate" here, to create its scale.`);
+    return;
+  }
+
+  alert(`No point code matching "${raw}" found (checked both generated point codes and the uploaded list).`);
+}
+
+function renderPcList(){
+  const container = document.getElementById('pcList');
+  container.innerHTML = '';
+  updateSearchDatalist();
+  pointCodeList.forEach((entry, idx)=>{
+    const div = document.createElement('div');
+    div.className = 'pc-list-item' + (entry.status==='done' ? ' done' : '');
+    div.innerHTML = `<span class="dot" style="background:${entry.status==='done' ? '#5fbf8a' : '#e0a458'};"></span>`+
+      `<span class="code">${entry.code}</span>`+
+      `<span style="font-size:10px;color:var(--ink-dim);">${entry.status==='done' ? '✓' : '→'}</span>`;
+    div.onclick = ()=>generateFromList(idx);
+    container.appendChild(div);
+  });
+  const done = pointCodeList.filter(p=>p.status==='done').length;
+  document.getElementById('pcListStatus').textContent = `${done}/${pointCodeList.length}`;
+}
+
+function generateFromList(idx){
+  const entry = pointCodeList[idx];
+  if(!roadLayer){
+    alert('Upload a road network first (GeoJSON or KML) — the guide needs a road line to orient perpendicular to.');
+    return;
+  }
+  if(entry.status==='done' && !confirm(`"${entry.code}" was already generated. Regenerate it at its file coordinate? This overwrites any manual adjustments made to it.`)) return;
+
+  map.setView(entry.latlng, Math.max(map.getZoom(), 19));
+  const ok = createPointCodeAt(entry.code, entry.latlng);
+  if(!ok){
+    alert(`"${entry.code}": no road segment found within 60m of its coordinate. You can still place it manually on the map instead.`);
+    return;
+  }
+  entry.status = 'done';
+  renderPcList();
+  document.getElementById('pcHint').textContent = `"${entry.code}" placed from the point code list, snapped perpendicular to the nearest road. Drag any tick to fine-tune.`;
+}
+
+
+const records = [];
+
+function makePcIcon(color, angleDeg){
+  return L.divIcon({
+    className:'',
+    html:`<div style="position:relative;width:26px;height:26px;">
+      <div class="pc-tick-hit"></div>
+      <div class="pc-tick-bar" style="background:${color};transform:rotate(${angleDeg}deg);"></div>
+    </div>`,
+    iconSize:[26,26], iconAnchor:[13,13]
+  });
+}
+
+// angle (CSS degrees) to rotate a vertical bar so it ends up perpendicular to the A->B axis,
+// matching how the axis actually looks on screen (equirect meters are locally angle-accurate
+// here since Web Mercator is conformal at this scale).
+function axisAngleDeg(posA, posB){
+  const originLat = posA.lat;
+  const a = llToXY(posA, originLat), b = llToXY(posB, originLat);
+  const meterAngle = Math.atan2(b.y-a.y, b.x-a.x);
+  return -meterAngle * 180/Math.PI;
+}
+
+function updateTickAngles(code){
+  const pc = pcRegistry[code];
+  const angle = axisAngleDeg(pc.positions[0], pc.positions[3]);
+  pc.markers.forEach(m=>{
+    const el = m.getElement();
+    if(!el) return;
+    const bar = el.querySelector('.pc-tick-bar');
+    if(bar) bar.style.transform = `rotate(${angle}deg)`;
+  });
+}
+
+function drawHaloLine(points, group, weight){
+  L.polyline(points, {color:'#000', weight: weight+2.5, opacity:0.4}).addTo(group);
+  L.polyline(points, {color:'#fff', weight: weight, opacity:0.95}).addTo(group);
+}
+function midpoint(a,b){ return L.latLng((a.lat+b.lat)/2, (a.lng+b.lng)/2); }
+
+// redraws only the halo lines/ticks/labels -- never touches pc.markerLayer, so an in-progress
+// drag on one of the 4 markers is never interrupted by a redraw triggered by that same drag.
+function redrawPc(code){
+  const pc = pcRegistry[code];
+  pc.visualLayer.clearLayers();
+  const [pA,pFA,pFB,pB] = pc.positions;
+  drawHaloLine(pc.positions, pc.visualLayer, 2.2);
+
+  const fA = pA.distanceTo(pFA), cw = pFA.distanceTo(pFB), fB = pFB.distanceTo(pB), row = pA.distanceTo(pB);
+  const labels = [[midpoint(pA,pFA), `Ft A · ${fA.toFixed(1)}m`], [midpoint(pFA,pFB), `Carriageway · ${cw.toFixed(1)}m`], [midpoint(pFB,pB), `Ft B · ${fB.toFixed(1)}m`]];
+  labels.forEach(([pos,text])=>{
+    L.circleMarker(pos, {radius:0, opacity:0, fillOpacity:0}).addTo(pc.visualLayer)
+      .bindTooltip(text, {permanent:true, direction:'top', offset:[0,-4], className:'dim-label'});
+  });
+  L.circleMarker(midpoint(pFA,pFB), {radius:5, color:'#e0453a', fillColor:'#e0453a', fillOpacity:1, weight:2}).addTo(pc.visualLayer)
+    .bindTooltip(code, {permanent:true, direction:'bottom', offset:[0,10], className:'pc-label'});
+
+  return {footpathA_m:fA, carriageway_m:cw, footpathB_m:fB, row_total_m:row};
+}
+
+function sanitizeKey(code){ return code.replace(/[\s\/\\'"]/g, '_').slice(0,150); }
+
+async function savePc(code){
+  const pc = pcRegistry[code];
+  const m = redrawPc(code);
+  const rec = {pointCode: code, roadName: pc.roadName || '', ...m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})), savedAt: new Date().toISOString()};
+  const existing = records.findIndex(r=>r.pointCode===code);
+  if(existing>-1) records[existing]=rec; else records.push(rec);
+  renderLog();
+  try{
+    await window.storage.set('xsec:'+sanitizeKey(code), JSON.stringify(rec), false);
+    await refreshSavedCount();
+  }catch(err){ console.error('save failed', code, err); }
+}
+
+// axis-based position model: pc.center + pc.dir (unit vector) + pc.offsets (signed meters
+// along dir) define all 4 tick positions. Only the rotate handle changes pc.dir; dragging any
+// of the 4 ticks only changes its own offset, sliding along the current line -- never off it.
+function syncPositionsFromAxis(pc){
+  const originLat = pc.center.lat;
+  const c = llToXY(pc.center, originLat);
+  pc.positions = pc.offsets.map(o => xyToLL(c.x + pc.dir.x*o, c.y + pc.dir.y*o, originLat));
+}
+
+// reconstructs the axis model from 4 saved lat/lngs (used when loading older/saved data) --
+// also has the side effect of auto-straightening anything saved before axis-locking existed.
+function reconstructAxisFromPositions(positions){
+  const pA = positions[0], pB = positions[3];
+  const center = midpoint(pA, pB);
+  const originLat = center.lat;
+  const c = llToXY(center, originLat);
+  const a = llToXY(pA, originLat), b = llToXY(pB, originLat);
+  const dx = b.x-a.x, dy = b.y-a.y, len = Math.hypot(dx,dy) || 1;
+  const dir = {x: dx/len, y: dy/len};
+  const offsets = positions.map(p=>{
+    const pxy = llToXY(p, originLat);
+    return (pxy.x-c.x)*dir.x + (pxy.y-c.y)*dir.y;
+  });
+  return {center, dir, offsets};
+}
+
+function makeRotateIcon(){
+  return L.divIcon({
+    className:'',
+    html:`<div class="pc-rotate-hit">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0a0e0b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-3.5-7.1"/><polyline points="21 3 21 9 15 9"/>
+      </svg>
+    </div>`,
+    iconSize:[26,26], iconAnchor:[13,13]
+  });
+}
+
+const ROTATE_DIST_M = 5;
+
+function tangentOf(pc){ return {x:-pc.dir.y, y:pc.dir.x}; } // perpendicular to dir = along the road
+
+function rotateHandlePos(pc){
+  const originLat = pc.center.lat;
+  const c = llToXY(pc.center, originLat);
+  const t = tangentOf(pc);
+  return xyToLL(c.x + t.x*ROTATE_DIST_M, c.y + t.y*ROTATE_DIST_M, originLat);
+}
+
+function createRotateHandle(code){
+  const pc = pcRegistry[code];
+  const handle = L.marker(rotateHandlePos(pc), {icon: makeRotateIcon(), draggable:true})
+    .addTo(pc.markerLayer)
+    .bindTooltip('Drag to rotate the scale', {direction:'top', offset:[0,-10]});
+
+  function applyRotation(mouseLatLng){
+    const originLat = pc.center.lat;
+    const c = llToXY(pc.center, originLat);
+    const m = llToXY(mouseLatLng, originLat);
+    const vx = m.x-c.x, vy = m.y-c.y;
+    const len = Math.hypot(vx,vy);
+    if(len < 0.05) return; // ignore near-zero drags (avoid divide-by-zero jitter)
+    const newTangent = {x: vx/len, y: vy/len};
+    pc.dir = {x: -newTangent.y, y: newTangent.x};
+    syncPositionsFromAxis(pc);
+    handle.setLatLng(rotateHandlePos(pc));
+    pc.markers.forEach((mk,i)=>mk.setLatLng(pc.positions[i]));
+    redrawPc(code); updateTickAngles(code);
+  }
+  handle.on('drag', e=>applyRotation(e.target.getLatLng()));
+  handle.on('dragend', e=>{ applyRotation(e.target.getLatLng()); savePc(code); });
+  pc.rotateHandle = handle;
+}
+
+function createPcMarkers(code){
+  const pc = pcRegistry[code];
+  const angle = axisAngleDeg(pc.positions[0], pc.positions[3]);
+  pc.markers = pc.positions.map((pos,i)=>{
+    const marker = L.marker(pos, {icon: makePcIcon(PC_COLORS[i], angle), draggable:true})
+      .addTo(pc.markerLayer)
+      .bindTooltip(PC_LABELS[i], {direction:'top', offset:[0,-8]});
+
+    // every tick (building edge or footpath edge) only slides its own offset along the fixed
+    // axis -- none of them can rotate or bend the line anymore. Rotation is the handle's job.
+    function applyOffset(mouseLatLng){
+      const originLat = pc.center.lat;
+      const c = llToXY(pc.center, originLat);
+      const m = llToXY(mouseLatLng, originLat);
+      const offset = (m.x-c.x)*pc.dir.x + (m.y-c.y)*pc.dir.y;
+      pc.offsets[i] = offset;
+      syncPositionsFromAxis(pc);
+      marker.setLatLng(pc.positions[i]);
+      redrawPc(code);
+    }
+    marker.on('drag', e=>applyOffset(e.target.getLatLng()));
+    marker.on('dragend', e=>{ applyOffset(e.target.getLatLng()); savePc(code); });
+    return marker;
+  });
+}
+
+// core creation logic, shared by manual map-click entry and by the point-code list.
+// returns true on success, false if no road was found nearby (caller decides how to report that).
+function createPointCodeAt(code, clickLatLng){
+  const snap = nearestPointOnRoads(clickLatLng, 60);
+  if(!snap) return false;
+
+  const totalLen = parseFloat(document.getElementById('guideLen').value) || 30;
+  const halfLen = totalLen/2;
+  const footpathGuess = Math.min(1.8, halfLen*0.3);
+
+  const center = snap.point;
+  const dir = {x:-snap.tangent.ty, y:snap.tangent.tx}; // perpendicular to the snapped road's tangent, always
+  const offsets = [-halfLen, -(halfLen-footpathGuess), (halfLen-footpathGuess), halfLen];
+
+  if(pcRegistry[code]) map.removeLayer(pcRegistry[code].group);
+
+  const group = L.layerGroup().addTo(map);
+  const visualLayer = L.layerGroup().addTo(group);
+  const markerLayer = L.layerGroup().addTo(group);
+  pcRegistry[code] = {center, dir, offsets, group, visualLayer, markerLayer, roadName: snap.props ? (snap.props.Road_CentrelineName||snap.props.name||'') : ''};
+  syncPositionsFromAxis(pcRegistry[code]);
+  createPcMarkers(code);
+  createRotateHandle(code);
+  savePc(code);
+  return true;
+}
+
+function addPointCode(clickLatLng){
+  if(!roadLayer){
+    alert('Upload a road network first (GeoJSON or KML) — the guide needs a road line to orient perpendicular to.');
+    return;
+  }
+
+  // if a point-code list is loaded, clicking near a pending code uses it automatically
+  const NEARBY_M = 20;
+  let matched = null;
+  for(const entry of pointCodeList){
+    if(entry.status !== 'pending') continue;
+    if(clickLatLng.distanceTo(entry.latlng) <= NEARBY_M){ matched = entry; break; }
+  }
+
+  let code;
+  let targetLatLng = clickLatLng;
+  if(matched){
+    code = matched.code;
+    targetLatLng = matched.latlng; // use the file's coordinate, not the imprecise click
+  } else {
+    code = prompt('Point code for this location:', '');
+    if(code === null) return;
+    code = code.trim() || ('PC-' + Date.now().toString(36).toUpperCase());
+    if(pcRegistry[code] && !confirm(`"${code}" already exists on this map. Overwrite it at this new location?`)) return;
+  }
+
+  const ok = createPointCodeAt(code, targetLatLng);
+  if(!ok){
+    alert(`No road segment found within 60m of that click. Click closer to a road line from your loaded network.`);
+    return;
+  }
+  if(matched){ matched.status = 'done'; renderPcList(); }
+
+  document.getElementById('pcHint').textContent = `"${code}" placed, snapped perpendicular to the nearest road${pcRegistry[code].roadName ? ' ('+pcRegistry[code].roadName+')' : ''}. Drag any tick to fine-tune.`;
+}
+
+let addMode = false;
+function toggleMode(){
+  addMode = !addMode;
+  document.getElementById('mode-pc').classList.toggle('active', addMode);
+  document.getElementById('mode-pc').textContent = addMode ? 'Click the map to place…' : 'Add point code';
+}
+map.on('click', e=>{
+  if(!addMode) return;
+  addPointCode(e.latlng);
+});
+
+function typeLabelRow(r){
+  return `<span class="del" onclick="deleteRecord('${r.pointCode}')">✕</span>`+
+    `<span class="k">${r.pointCode}</span>${r.roadName ? ' — '+r.roadName : ''}<br>`+
+    `Footpath A: <span class="w">${r.footpathA_m.toFixed(2)} m</span><br>`+
+    `Carriageway: <span class="w">${r.carriageway_m.toFixed(2)} m</span><br>`+
+    `Footpath B: <span class="w">${r.footpathB_m.toFixed(2)} m</span><br>`+
+    `Total ROW: <span class="w">${r.row_total_m.toFixed(2)} m</span>`;
+}
+
+function renderLog(){
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+  updateSearchDatalist();
+  records.slice().reverse().forEach(r=>{
+    const div = document.createElement('div');
+    div.className = 'entry';
+    div.innerHTML = typeLabelRow(r);
+    log.appendChild(div);
+  });
+}
+
+async function deleteRecord(code){
+  if(!confirm(`Delete point code "${code}"?`)) return;
+  const idx = records.findIndex(r=>r.pointCode===code);
+  if(idx>-1) records.splice(idx,1);
+  if(pcRegistry[code]){ map.removeLayer(pcRegistry[code].group); delete pcRegistry[code]; }
+  try{ await window.storage.delete('xsec:'+sanitizeKey(code), false); }catch(err){}
+  renderLog();
+  await refreshSavedCount();
+}
+
+async function refreshSavedCount(){
+  try{
+    const listing = await window.storage.list('xsec:', false);
+    document.getElementById('savedCount').textContent = listing && listing.keys ? listing.keys.length : 0;
+  }catch(err){}
+}
+
+async function clearAllSaved(){
+  if(!confirm('Delete ALL saved point codes? This cannot be undone.')) return;
+  try{
+    const listing = await window.storage.list('xsec:', false);
+    if(listing && listing.keys){ for(const key of listing.keys){ await window.storage.delete(key, false); } }
+  }catch(err){}
+  Object.keys(pcRegistry).forEach(code=>map.removeLayer(pcRegistry[code].group));
+  Object.keys(pcRegistry).forEach(code=>delete pcRegistry[code]);
+  records.length = 0;
+  renderLog();
+  await refreshSavedCount();
+}
+
+async function loadSaved(){
+  try{
+    const listing = await window.storage.list('xsec:', false);
+    if(!listing || !listing.keys) return;
+    for(const key of listing.keys){
+      try{
+        const res = await window.storage.get(key, false);
+        if(!res) continue;
+        const d = JSON.parse(res.value);
+        const positions = d.latlngs.map(p=>L.latLng(p.lat,p.lng));
+        const axis = reconstructAxisFromPositions(positions); // also auto-straightens any pre-fix bent saves
+        const dimLayer = L.layerGroup().addTo(map);
+        const visualLayer = L.layerGroup().addTo(dimLayer);
+        const markerLayer = L.layerGroup().addTo(dimLayer);
+        pcRegistry[d.pointCode] = {center:axis.center, dir:axis.dir, offsets:axis.offsets, group: dimLayer, visualLayer, markerLayer, roadName: d.roadName||''};
+        syncPositionsFromAxis(pcRegistry[d.pointCode]);
+        createPcMarkers(d.pointCode);
+        createRotateHandle(d.pointCode);
+        redrawPc(d.pointCode);
+        records.push({pointCode:d.pointCode, roadName:d.roadName||'', footpathA_m:d.footpathA_m, carriageway_m:d.carriageway_m, footpathB_m:d.footpathB_m, row_total_m:d.row_total_m, latlngs:d.latlngs, savedAt:d.savedAt});
+      }catch(err){ console.error('load fail', key, err); }
+    }
+    renderLog();
+    await refreshSavedCount();
+  }catch(err){}
+}
+loadSaved();
+
+function exportData(fmt){
+  if(records.length===0){ alert('No point codes saved yet.'); return; }
+  let content, mime, ext;
+  if(fmt==='geojson'){
+    const features = records.map(r=>({
+      type:'Feature',
+      properties:{point_code:r.pointCode, road_name:r.roadName, footpathA_m:r.footpathA_m, carriageway_m:r.carriageway_m, footpathB_m:r.footpathB_m, row_total_m:r.row_total_m, saved_at:r.savedAt||''},
+      geometry:{type:'LineString', coordinates:r.latlngs.map(p=>[p.lng,p.lat])}
+    }));
+    content = JSON.stringify({type:'FeatureCollection', features}, null, 2);
+    mime='application/geo+json'; ext='geojson';
+  } else {
+    const rows = ['point_code,footpathA_m,carriageway_m,footpathB_m,row_total_m,road_name,lat_buildingA,lng_buildingA,lat_buildingB,lng_buildingB'];
+    records.forEach(r=>{
+      const p1=r.latlngs[0], p2=r.latlngs[3];
+      rows.push([`"${r.pointCode.replace(/"/g,'""')}"`, r.footpathA_m.toFixed(3), r.carriageway_m.toFixed(3), r.footpathB_m.toFixed(3), r.row_total_m.toFixed(3), `"${(r.roadName||'').replace(/"/g,'""')}"`, p1.lat, p1.lng, p2.lat, p2.lng].join(','));
+    });
+    content = rows.join('\n');
+    mime='text/csv'; ext='csv';
+  }
+  const blob = new Blob([content], {type:mime});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `point_codes.${ext}`;
+  a.click();
+}
+</script>
+</body>
+</html>
