@@ -127,20 +127,20 @@
     </div>
 
     <div class="sec">
-      <h2>Training image capture</h2>
+      <h2>Image capture buffer</h2>
       <div class="row"><label>Buffer</label>
         <input type="text" id="imgBuffer" value="25"/><span style="font-size:11px;color:var(--ink-dim);">m each side</span>
       </div>
-      <button style="margin-top:8px;" onclick="captureAll('basemap')">Capture ALL — basemap screenshot</button>
-      <button style="margin-top:6px;" onclick="captureAll('drone')">Capture ALL — drone image</button>
       <div class="hint" id="captureAllStatus"></div>
     </div>
 
     <div class="sec">
-      <h2>Google Sheet + Drive sync</h2>
-      <input type="text" id="sheetSyncUrl" value="https://script.google.com/macros/s/AKfycbyZBY1zjUQDiziVfF-Rxn_V8gc5n-HP83uAxLALf2TUhp-gm63g4c4B5ukyw8vsFNTB/exec" style="margin-bottom:6px;"/>
-      <button onclick="syncAllToSheet()">Sync all saved point codes now</button>
-      <div class="hint" id="sheetSyncStatus"></div>
+      <details>
+        <summary style="cursor:pointer;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);">Google Sheet + Drive sync (advanced)</summary>
+        <input type="text" id="sheetSyncUrl" value="https://script.google.com/macros/s/AKfycbyZBY1zjUQDiziVfF-Rxn_V8gc5n-HP83uAxLALf2TUhp-gm63g4c4B5ukyw8vsFNTB/exec" style="margin:8px 0 6px;"/>
+        <button onclick="syncAllToSheet()">Re-sync all saved point codes (fallback)</button>
+        <div class="hint" id="sheetSyncStatus"></div>
+      </details>
     </div>
 
     <div class="sec">
@@ -611,20 +611,32 @@ function updateActionIcon(code){
 
 // the one deliberate "commit" action: locking persists the current adjustment and hides the
 // drag handles so nothing gets bumped by accident; editing un-hides them for further adjustment.
-function toggleLock(code){
+async function toggleLock(code){
   const pc = pcRegistry[code];
   if(pc.locked){
     pc.locked = false;
     if(!map.hasLayer(pc.markerLayer)) pc.markerLayer.addTo(map);
+    updateActionIcon(code);
+    renderLog();
   } else {
     pc.locked = true;
     savePc(code);
-    syncPointCodeToSheet(code);
     map.removeLayer(pc.markerLayer);
+    updateActionIcon(code);
+    renderLog();
+
+    const statusEl = document.getElementById('captureAllStatus');
+    const btn = document.getElementById('savebtn-'+sanitizeKey(code));
+    if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+    if(statusEl) statusEl.textContent = `Syncing "${code}" to the sheet and capturing its drone image…`;
+
+    await syncPointCodeToSheet(code);
+    await captureDroneImage(code); // captures + uploads to Drive + writes links into the sheet row
+
+    if(statusEl) statusEl.textContent = `"${code}" saved: row synced, image captured and uploaded.`;
+    renderLog(); // resets the button out of its "Saving…" state, and shows the "✓ images saved" tag
     armAddMode();
   }
-  updateActionIcon(code);
-  renderLog();
 }
 
 function createPcMarkers(code){
@@ -771,9 +783,7 @@ function typeLabelRow(r){
     `Carriageway: <span class="w">${r.carriageway_m.toFixed(2)} m</span><br>`+
     `Footpath B: <span class="w">${r.footpathB_m.toFixed(2)} m</span><br>`+
     `Total ROW: <span class="w">${r.row_total_m.toFixed(2)} m</span><br>`+
-    `<button style="margin-top:6px;width:auto;padding:5px 9px;font-size:10.5px;" onclick="toggleLock('${r.pointCode}')">${locked ? '✏️ Edit' : '💾 Save'}</button> `+
-    `<button id="capbtn-${skey}" style="margin-top:6px;width:auto;padding:5px 9px;font-size:10.5px;" onclick="captureCode('${r.pointCode}')">📷 Capture</button> `+
-    `<button id="dronebtn-${skey}" style="margin-top:6px;width:auto;padding:5px 9px;font-size:10.5px;" onclick="captureDroneImage('${r.pointCode}')">🛰️ Drone image</button>`+
+    `<button id="savebtn-${skey}" style="margin-top:6px;width:auto;padding:5px 9px;font-size:10.5px;" onclick="toggleLock('${r.pointCode}')">${locked ? '✏️ Edit' : '💾 Save (photo + sheet)'}</button>`+
     (img ? ` <span style="font-size:10px;color:var(--accent);">✓ images saved</span>` : '');
 }
 
