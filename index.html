@@ -746,8 +746,7 @@ async function toggleLock(code){
     if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
     if(statusEl) statusEl.textContent = `Syncing "${code}" to the sheet and capturing its drone image…`;
 
-    await syncPointCodeToSheet(code);
-    await captureDroneImage(code); // captures + uploads to Drive + writes links into the sheet row
+    await saveEverythingToSheet(code); // one combined request: sheet row + both images, atomically
 
     if(statusEl) statusEl.textContent = `"${code}" saved: row synced, image captured and uploaded.`;
     renderLog(); // resets the button out of its "Saving…" state, and shows the "✓ images saved" tag
@@ -1127,51 +1126,60 @@ function drawDimensionOnCanvas(ctx, pc, center, bufferM, pxW, pxH){
   ctx.fillStyle = '#e0453a'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#000'; ctx.stroke();
 }
 
-async function captureDroneImage(code){
+// captures the drone image and returns the raw + annotated canvases, without uploading
+// anything -- used by both the standalone capture button and the combined save flow.
+async function captureDroneImageCanvas(code){
   const pc = pcRegistry[code];
-  if(!pc){ alert('Point code not found.'); return; }
-
   const bufferM = parseFloat(document.getElementById('imgBuffer').value) || 15;
   const NATIVE_MPP = 0.037; // per the RDGIS technical note's documented resolution
   const pxSize = Math.min(2048, Math.max(256, Math.round(bufferM/NATIVE_MPP)));
   const url = buildDroneImageUrl(pc.center, bufferM, pxSize);
 
+  const img = await new Promise((resolve,reject)=>{
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = ()=>resolve(im);
+    im.onerror = ()=>reject(new Error('image request failed'));
+    im.src = url;
+  });
+
+  const rawCanvas = document.createElement('canvas');
+  rawCanvas.width = img.width; rawCanvas.height = img.height;
+  rawCanvas.getContext('2d').drawImage(img,0,0);
+
+  const annCanvas = document.createElement('canvas');
+  annCanvas.width = img.width; annCanvas.height = img.height;
+  const actx = annCanvas.getContext('2d');
+  actx.drawImage(img,0,0);
+  drawDimensionOnCanvas(actx, pc, pc.center, bufferM, img.width, img.height);
+
+  return {rawCanvas, annCanvas, width: img.width, height: img.height, sourceUrl: url};
+}
+
+async function captureDroneImage(code){
+  const pc = pcRegistry[code];
+  if(!pc){ alert('Point code not found.'); return; }
+
   const btn = document.getElementById('dronebtn-'+sanitizeKey(code));
   if(btn){ btn.textContent = 'Loading…'; btn.disabled = true; }
 
   try{
-    const img = await new Promise((resolve,reject)=>{
-      const im = new Image();
-      im.crossOrigin = 'anonymous';
-      im.onload = ()=>resolve(im);
-      im.onerror = ()=>reject(new Error('image request failed'));
-      im.src = url;
-    });
-
-    const rawCanvas = document.createElement('canvas');
-    rawCanvas.width = img.width; rawCanvas.height = img.height;
-    rawCanvas.getContext('2d').drawImage(img,0,0);
+    const cap = await captureDroneImageCanvas(code);
     const rawName = `${sanitizeKey(code)}_drone_raw.png`;
-    await downloadCanvasPng(rawCanvas, rawName);
-    uploadImageToDrive(rawCanvas, rawName, code, 'map_image');
-
-    const annCanvas = document.createElement('canvas');
-    annCanvas.width = img.width; annCanvas.height = img.height;
-    const actx = annCanvas.getContext('2d');
-    actx.drawImage(img,0,0);
-    drawDimensionOnCanvas(actx, pc, pc.center, bufferM, img.width, img.height);
     const annName = `${sanitizeKey(code)}_drone_annotated.png`;
-    await downloadCanvasPng(annCanvas, annName);
-    uploadImageToDrive(annCanvas, annName, code, 'annotated_image');
+    await downloadCanvasPng(cap.rawCanvas, rawName);
+    uploadImageToDrive(cap.rawCanvas, rawName, code, 'map_image');
+    await downloadCanvasPng(cap.annCanvas, annName);
+    uploadImageToDrive(cap.annCanvas, annName, code, 'annotated_image');
 
     imageMeta[code] = {rawFilename: rawName, annotatedFilename: annName, capturedAt: new Date().toISOString(), source:'drone_wms'};
     try{ await window.storage.set('imgmeta:'+sanitizeKey(code), JSON.stringify(imageMeta[code]), false); }catch(err){ console.error('imgmeta save failed', err); }
     renderLog();
-    alert(`Captured native-resolution drone imagery for "${code}" (${img.width}×${img.height}px):\n${rawName}\n${annName}`);
+    alert(`Captured native-resolution drone imagery for "${code}" (${cap.width}×${cap.height}px):\n${rawName}\n${annName}`);
   }catch(err){
     console.error('drone capture failed', code, err);
     if(confirm(`Could not export this directly — the server likely doesn't allow cross-origin pixel access (this is a server-side setting, not something fixable from here). Open the image in a new tab instead, so you can save it yourself with a right-click?`)){
-      window.open(url, '_blank');
+      window.open(pc._lastCaptureUrl || '', '_blank');
     }
   } finally {
     if(btn){ btn.textContent = '🛰️ Drone image'; btn.disabled = false; }
@@ -1291,6 +1299,60 @@ document.getElementById('sheetSyncUrl').addEventListener('change', async e=>{
   sheetSyncUrl = e.target.value.trim();
   try{ await window.storage.set('config:sheetSyncUrl', sheetSyncUrl, false); }catch(err){ console.error('could not save sync URL', err); }
 });
+
+// combined save: sheet row + both images, all in ONE request, so there is only ever a
+// single row lookup on the server -- eliminates the 3-separate-requests race that was
+// causing measurements and image links to land in different rows.
+async function saveEverythingToSheet(code){
+  if(!sheetSyncUrl) return {ok:false};
+  const pc = pcRegistry[code];
+  const rec = records.find(r=>r.pointCode===code);
+  if(!pc || !rec) return {ok:false};
+
+  const rawName = `${sanitizeKey(code)}_drone_raw.png`;
+  const annName = `${sanitizeKey(code)}_drone_annotated.png`;
+  let rawBase64 = null, annBase64 = null, capturedOk = false;
+
+  try{
+    const cap = await captureDroneImageCanvas(code);
+    rawBase64 = cap.rawCanvas.toDataURL('image/png');
+    annBase64 = cap.annCanvas.toDataURL('image/png');
+    await downloadCanvasPng(cap.rawCanvas, rawName);
+    await downloadCanvasPng(cap.annCanvas, annName);
+    capturedOk = true;
+  }catch(err){
+    console.error('drone image capture failed, saving sheet row without images', code, err);
+  }
+
+  const payload = {
+    type: 'full_save',
+    s_code: pc.sCode || '',
+    point_code: pc.pointCode !== undefined ? pc.pointCode : code,
+    latitude_longitude: `${pc.center.lat.toFixed(6)}, ${pc.center.lng.toFixed(6)}`,
+    footpath_side_a: Number(rec.footpathA_m.toFixed(2)),
+    carriage_way: Number(rec.carriageway_m.toFixed(2)),
+    footpath_side_b: Number(rec.footpathB_m.toFixed(2)),
+    row_total: Number(rec.row_total_m.toFixed(2)),
+    offset_distance: Number((rec.offsetFromNominal_m||0).toFixed(1)),
+    timestamp: new Date().toISOString(),
+    raw_filename: rawName, annotated_filename: annName,
+    raw_base64: rawBase64, annotated_base64: annBase64
+  };
+
+  try{
+    await fetch(sheetSyncUrl, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify(payload)
+    });
+  }catch(err){ console.error('combined save failed', code, err); return {ok:false}; }
+
+  if(capturedOk){
+    imageMeta[code] = {rawFilename: rawName, annotatedFilename: annName, capturedAt: new Date().toISOString(), source:'drone_wms'};
+    try{ await window.storage.set('imgmeta:'+sanitizeKey(code), JSON.stringify(imageMeta[code]), false); }catch(err){}
+  }
+  return {ok:true, hasImages: capturedOk};
+}
 
 async function syncPointCodeToSheet(code){
   if(!sheetSyncUrl) return;
