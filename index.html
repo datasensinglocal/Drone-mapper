@@ -314,6 +314,20 @@ function extractPcCode(props, fallbackIndex){
   return 'PC-' + (fallbackIndex+1);
 }
 
+// builds a unique tool identifier + retains the raw s_code/point_code values separately.
+// point_code alone is only unique WITHIN one s_code (e.g. point_code=8 exists under many
+// different s_codes) -- so the map/tool identifier combines both, while the raw values are
+// kept for writing into their own separate sheet columns later.
+function extractPcIdentity(props, fallbackIndex){
+  if(props && props.code !== undefined && props.point_code !== undefined){
+    const sCode = String(props.code).trim();
+    const pointCode = String(props.point_code).trim();
+    return {code: `${sCode}-${pointCode}`, sCode, pointCode};
+  }
+  const code = extractPcCode(props, fallbackIndex);
+  return {code, sCode: '', pointCode: code};
+}
+
 document.getElementById('pcListInput').addEventListener('change', e=>{
   const file = e.target.files[0];
   if(!file) return;
@@ -324,12 +338,15 @@ document.getElementById('pcListInput').addEventListener('change', e=>{
       const gj = isKML ? kmlToGeoJSON(ev.target.result) : JSON.parse(ev.target.result);
       const points = gj.features.filter(f=>f.geometry && f.geometry.type==='Point');
       if(points.length===0) throw new Error('No Point features found in this file.');
-      pointCodeList = points.map((f,i)=>({
-        code: extractPcCode(f.properties, i),
-        latlng: L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]),
-        status: pcRegistry[extractPcCode(f.properties, i)] ? 'done' : 'pending',
-        properties: f.properties || {}
-      }));
+      pointCodeList = points.map((f,i)=>{
+        const identity = extractPcIdentity(f.properties, i);
+        return {
+          code: identity.code, sCode: identity.sCode, pointCode: identity.pointCode,
+          latlng: L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]),
+          status: pcRegistry[identity.code] ? 'done' : 'pending',
+          properties: f.properties || {}
+        };
+      });
       renderPcList();
       document.getElementById('pcListContainer').style.display = 'block';
       if(pointCodeList.length){
@@ -428,6 +445,8 @@ function generateFromList(idx){
     return;
   }
   entry.status = 'done';
+  pcRegistry[entry.code].sCode = entry.sCode;
+  pcRegistry[entry.code].pointCode = entry.pointCode;
   renderPcList();
   disarmAddMode();
   setSelectedPointCode(entry.code);
@@ -820,7 +839,12 @@ function addPointCode(clickLatLng){
     alert(msg);
     return;
   }
-  if(matched){ matched.status = 'done'; renderPcList(); }
+  if(matched){
+    matched.status = 'done';
+    pcRegistry[code].sCode = matched.sCode;
+    pcRegistry[code].pointCode = matched.pointCode;
+    renderPcList();
+  }
   disarmAddMode();
   setSelectedPointCode(code);
 
@@ -1203,8 +1227,11 @@ function exportExcel(){
 
   const rows = records.map(r=>{
     const img = imageMeta[r.pointCode] || {};
+    const pcInfo = pcRegistry[r.pointCode] || {};
     return {
-      'Point Code': r.pointCode,
+      'Point Code (tool ID)': r.pointCode,
+      'S Code': pcInfo.sCode || '',
+      'Point Code (number)': pcInfo.pointCode !== undefined ? pcInfo.pointCode : r.pointCode,
       'Footpath A width (m)': +r.footpathA_m.toFixed(2),
       'Carriageway width (m)': +r.carriageway_m.toFixed(2),
       'Footpath B width (m)': +r.footpathB_m.toFixed(2),
@@ -1249,13 +1276,15 @@ async function syncPointCodeToSheet(code){
   if(!pc || !rec) return;
 
   const payload = {
-    point_code: code,
+    point_code: pc.pointCode !== undefined ? pc.pointCode : code, // raw point_code number when from a list, else the typed code
+    s_code: pc.sCode || '',
     latitude_longitude: `${pc.center.lat.toFixed(6)}, ${pc.center.lng.toFixed(6)}`,
     footpath_side_a: Number(rec.footpathA_m.toFixed(2)),
     carriage_way: Number(rec.carriageway_m.toFixed(2)),
     footpath_side_b: Number(rec.footpathB_m.toFixed(2)),
     row_total: Number(rec.row_total_m.toFixed(2)),
-    offset_distance: Number((rec.offsetFromNominal_m||0).toFixed(1))
+    offset_distance: Number((rec.offsetFromNominal_m||0).toFixed(1)),
+    timestamp: new Date().toISOString()
   };
   try{
     // text/plain content-type avoids a CORS preflight that Apps Script Web Apps don't handle;
@@ -1283,14 +1312,19 @@ async function syncAllToSheet(){
 // uploads a captured canvas straight to the Drive folder via the same Apps Script endpoint --
 // the script writes the resulting link into map_image/annotated_image itself (see note in the
 // .gs file) since this no-cors request can't read a response back here to do it client-side.
-async function uploadImageToDrive(canvas, filename, pointCode, imageKind){
+async function uploadImageToDrive(canvas, filename, code, imageKind){
   if(!sheetSyncUrl) return;
+  const pc = pcRegistry[code];
   const base64 = canvas.toDataURL('image/png');
   try{
     await fetch(sheetSyncUrl, {
       method: 'POST', mode: 'no-cors',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({type:'image', filename, base64, point_code: pointCode, image_kind: imageKind})
+      body: JSON.stringify({
+        type:'image', filename, base64, image_kind: imageKind,
+        point_code: pc && pc.pointCode !== undefined ? pc.pointCode : code,
+        s_code: (pc && pc.sCode) || ''
+      })
     });
   }catch(err){ console.error('drive upload failed for', filename, err); }
 }
