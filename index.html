@@ -100,13 +100,8 @@
           <option value="osm">OSM</option>
           <option value="sat">Esri Satellite</option>
           <option value="wms">BBMP WMS overlay</option>
-          <option value="local">Local imagery (offline backup)</option>
         </select>
       </div>
-      <label class="filebtn" style="margin-top:8px;"><button onclick="document.getElementById('localImageryInput').click()">Upload local imagery (manifest + PNGs)</button></label>
-      <input type="file" id="localImageryInput" multiple accept=".json,.png"/>
-      <button class="danger" style="margin-top:6px;" onclick="clearLocalImagery()">Clear local imagery</button>
-      <div class="hint" id="localImageryStatus"></div>
     </div>
 
     <div class="sec">
@@ -128,26 +123,34 @@
     <div class="sec">
       <h2>Point codes</h2>
       <button id="mode-pc" onclick="toggleMode()">Add point code</button>
-      <div class="row" style="margin-top:10px;"><label>Guide length</label>
-        <input type="text" id="guideLen" value="30"/><span style="font-size:11px;color:var(--ink-dim);">m</span>
-      </div>
       <div class="hint" id="pcHint"></div>
-    </div>
-
-    <div class="sec">
-      <h2>Image capture buffer</h2>
-      <div class="row"><label>Buffer</label>
-        <input type="text" id="imgBuffer" value="25"/><span style="font-size:11px;color:var(--ink-dim);">m each side</span>
+      <div id="currentPcBar" style="display:none;margin-top:10px;padding:8px;border:1px solid var(--accent);border-radius:6px;background:var(--panel2);">
+        <div class="row" style="margin-bottom:0;">
+          <span id="currentPcLabel" style="flex:1;font-size:12px;font-weight:600;"></span>
+          <button id="currentPcSaveBtn" style="width:auto;padding:6px 10px;" onclick="toggleLock(selectedPointCode)"></button>
+        </div>
+        <div class="hint" style="margin-top:4px;">Click any point code's scale on the map to select it here. Press Enter to Save/Edit the selected one.</div>
       </div>
-      <div class="hint" id="captureAllStatus"></div>
     </div>
 
     <div class="sec">
       <details>
-        <summary style="cursor:pointer;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);">Google Sheet + Drive sync (advanced)</summary>
-        <input type="text" id="sheetSyncUrl" value="https://script.google.com/macros/s/AKfycbyZBY1zjUQDiziVfF-Rxn_V8gc5n-HP83uAxLALf2TUhp-gm63g4c4B5ukyw8vsFNTB/exec" style="margin:8px 0 6px;"/>
-        <button onclick="syncAllToSheet()">Re-sync all saved point codes (fallback)</button>
-        <div class="hint" id="sheetSyncStatus"></div>
+        <summary style="cursor:pointer;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);">Settings</summary>
+        <div style="margin-top:8px;">
+          <div class="row"><label>Guide length</label>
+            <input type="text" id="guideLen" value="30"/><span style="font-size:11px;color:var(--ink-dim);">m</span>
+          </div>
+          <div class="row"><label>Image buffer</label>
+            <input type="text" id="imgBuffer" value="25"/><span style="font-size:11px;color:var(--ink-dim);">m each side</span>
+          </div>
+          <div class="hint" id="captureAllStatus"></div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);">
+            <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin-bottom:6px;">Google Sheet + Drive sync</div>
+            <input type="text" id="sheetSyncUrl" value="https://script.google.com/macros/s/AKfycbyZBY1zjUQDiziVfF-Rxn_V8gc5n-HP83uAxLALf2TUhp-gm63g4c4B5ukyw8vsFNTB/exec" style="margin-bottom:6px;"/>
+            <button onclick="syncAllToSheet()">Re-sync all saved point codes (fallback)</button>
+            <div class="hint" id="sheetSyncStatus"></div>
+          </div>
+        </div>
       </details>
     </div>
 
@@ -179,56 +182,12 @@ const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Wo
 const wms = L.tileLayer.wms(WMS_URL, {layers: WMS_LAYER, format:'image/png', transparent:true, version:'1.1.1', maxZoom:22, crossOrigin:true});
 let activeBaseLayer = osm;
 
-const localImageryLayer = L.layerGroup(); // populated once the person uploads manifest+PNGs
-
 document.getElementById('baseSelect').addEventListener('change', e=>{
-  [osm,sat,wms,localImageryLayer].forEach(l=>map.removeLayer(l));
+  [osm,sat,wms].forEach(l=>map.removeLayer(l));
   if(e.target.value==='osm'){ osm.addTo(map); activeBaseLayer = osm; }
   if(e.target.value==='sat'){ sat.addTo(map); activeBaseLayer = sat; }
   if(e.target.value==='wms'){ wms.addTo(map); activeBaseLayer = wms; }
-  if(e.target.value==='local'){ localImageryLayer.addTo(map); activeBaseLayer = localImageryLayer; }
 });
-
-// local imagery: person selects manifest.json + all its PNG tiles together (multi-select).
-// Each tile becomes a positioned L.imageOverlay using the lat/lng bounds computed by
-// convert_tiles_for_offline_use.py -- this is the offline fallback if the WMS server
-// ever becomes unavailable.
-document.getElementById('localImageryInput').addEventListener('change', async e=>{
-  const files = Array.from(e.target.files);
-  const statusEl = document.getElementById('localImageryStatus');
-  const manifestFile = files.find(f=>f.name.toLowerCase().endsWith('.json'));
-  const pngFiles = files.filter(f=>f.name.toLowerCase().endsWith('.png'));
-
-  if(!manifestFile){
-    statusEl.textContent = 'No manifest.json found in your selection -- select it together with the PNG tiles.';
-    return;
-  }
-
-  statusEl.textContent = 'Loading local imagery…';
-  const manifestText = await manifestFile.text();
-  let manifest;
-  try{ manifest = JSON.parse(manifestText); }
-  catch(err){ statusEl.textContent = 'Could not parse manifest.json: ' + err.message; return; }
-
-  const pngByName = {};
-  pngFiles.forEach(f=>{ pngByName[f.name] = f; });
-
-  let loaded = 0, missing = 0;
-  manifest.tiles.forEach(t=>{
-    const file = pngByName[t.file];
-    if(!file){ missing++; return; }
-    const url = URL.createObjectURL(file);
-    L.imageOverlay(url, t.bounds).addTo(localImageryLayer);
-    loaded++;
-  });
-
-  statusEl.textContent = `Loaded ${loaded} local tile(s)${missing ? `, ${missing} referenced in the manifest were not selected` : ''} (added to any already loaded). Switch the basemap dropdown to "Local imagery" to view them.`;
-});
-
-function clearLocalImagery(){
-  localImageryLayer.clearLayers();
-  document.getElementById('localImageryStatus').textContent = 'Local imagery cleared.';
-}
 
 // ---- KML -> GeoJSON (minimal, handles BBMP-style exports) ----
 function kmlToGeoJSON(kmlText){
@@ -430,25 +389,34 @@ function renderPcList(){
   container.innerHTML = '';
   updateSearchDatalist();
   pointCodeList.forEach((entry, idx)=>{
+    const pc = pcRegistry[entry.code];
+    const hasData = !!(pc && pc.locked); // green only once actually saved, not merely placed
     const div = document.createElement('div');
-    div.className = 'pc-list-item' + (entry.status==='done' ? ' done' : '');
-    div.innerHTML = `<span class="dot" style="background:${entry.status==='done' ? '#5fbf8a' : '#e0a458'};"></span>`+
+    div.className = 'pc-list-item' + (hasData ? ' done' : '');
+    div.innerHTML = `<span class="dot" style="background:${hasData ? '#5fbf8a' : '#e0453a'};"></span>`+
       `<span class="code">${entry.code}</span>`+
-      `<span style="font-size:10px;color:var(--ink-dim);">${entry.status==='done' ? '✓' : '→'}</span>`;
+      `<span style="font-size:10px;color:var(--ink-dim);">${hasData ? '✓ saved' : (pc ? '✎ editing' : '→ place')}</span>`;
     div.onclick = ()=>generateFromList(idx);
     container.appendChild(div);
   });
-  const done = pointCodeList.filter(p=>p.status==='done').length;
+  const done = pointCodeList.filter(p=>pcRegistry[p.code] && pcRegistry[p.code].locked).length;
   document.getElementById('pcListStatus').textContent = `${done}/${pointCodeList.length}`;
 }
 
 function generateFromList(idx){
   const entry = pointCodeList[idx];
+
+  if(pcRegistry[entry.code]){
+    // already placed -- just bring it into view and select it for the Save bar, don't regenerate
+    map.setView(pcRegistry[entry.code].center, Math.max(map.getZoom(), 19));
+    setSelectedPointCode(entry.code);
+    return;
+  }
+
   if(!roadLayer){
     alert('Upload a road network first (GeoJSON or KML) — the guide needs a road line to orient perpendicular to.');
     return;
   }
-  if(entry.status==='done' && !confirm(`"${entry.code}" was already generated. Regenerate it at its file coordinate? This overwrites any manual adjustments made to it.`)) return;
 
   map.setView(entry.latlng, Math.max(map.getZoom(), 19));
   const result = createPointCodeAt(entry.code, entry.latlng);
@@ -462,6 +430,7 @@ function generateFromList(idx){
   entry.status = 'done';
   renderPcList();
   disarmAddMode();
+  setSelectedPointCode(entry.code);
   document.getElementById('pcHint').textContent = `"${entry.code}" placed from the point code list, snapped perpendicular to the nearest road. Drag any tick to fine-tune.`;
 }
 
@@ -515,6 +484,7 @@ function redrawPc(code){
   pc.visualLayer.clearLayers();
   const [pA,pFA,pFB,pB] = pc.positions;
   drawHaloLine(pc.positions, pc.visualLayer, 2.2);
+  L.polyline(pc.positions, {opacity:0, weight:16}).addTo(pc.visualLayer).on('click', ()=>setSelectedPointCode(code)); // generous invisible click target
 
   const fA = pA.distanceTo(pFA), cw = pFA.distanceTo(pFB), fB = pFB.distanceTo(pB), row = pA.distanceTo(pB);
   const labels = [[midpoint(pA,pFA), `Ft A · ${fA.toFixed(1)}m`], [midpoint(pFA,pFB), `Carriageway · ${cw.toFixed(1)}m`], [midpoint(pFB,pB), `Ft B · ${fB.toFixed(1)}m`]];
@@ -611,6 +581,7 @@ function createRotateHandle(code){
   const handle = L.marker(rotateHandlePos(pc), {icon: makeRotateIcon(), draggable:true, bubblingMouseEvents:false})
     .addTo(pc.markerLayer)
     .bindTooltip('Drag to rotate the scale', {direction:'top', offset:[0,-10]});
+  handle.on('click', ()=>setSelectedPointCode(code));
 
   // the handle sits ON the axis extension now, so its direction from center IS the new axis
   // direction directly -- no perpendicular conversion needed.
@@ -646,6 +617,7 @@ function createMoveHandle(code){
   })
     .addTo(pc.markerLayer)
     .bindTooltip(code, {permanent:true, direction:'bottom', offset:[0,10], className:'pc-label'});
+  handle.on('click', ()=>setSelectedPointCode(code));
 
   function applyMove(mouseLatLng){
     const snap = findNearestRoadPoint(mouseLatLng);
@@ -703,19 +675,30 @@ function updateActionIcon(code){
 
 // the one deliberate "commit" action: locking persists the current adjustment and hides the
 // drag handles so nothing gets bumped by accident; editing un-hides them for further adjustment.
+function setMarkersInteractive(pc, enabled){
+  pc.markers.forEach(m=>{ if(enabled) m.dragging.enable(); else m.dragging.disable(); });
+  if(pc.rotateHandle){ if(enabled) pc.rotateHandle.dragging.enable(); else pc.rotateHandle.dragging.disable(); }
+  if(pc.moveHandle){ if(enabled) pc.moveHandle.dragging.enable(); else pc.moveHandle.dragging.disable(); }
+}
+
 async function toggleLock(code){
   const pc = pcRegistry[code];
   if(pc.locked){
     pc.locked = false;
-    if(!map.hasLayer(pc.markerLayer)) pc.markerLayer.addTo(map);
+    setMarkersInteractive(pc, true);
     updateActionIcon(code);
     renderLog();
+    refreshCurrentPcBar();
+    renderPcList();
   } else {
     pc.locked = true;
+    setMarkersInteractive(pc, false); // markers stay visible on the map -- just no longer draggable
     savePc(code);
-    map.removeLayer(pc.markerLayer);
     updateActionIcon(code);
     renderLog();
+    refreshCurrentPcBar();
+    renderPcList();
+    armAddMode(); // re-arm right away -- don't make the person wait for the sync/capture below
 
     const statusEl = document.getElementById('captureAllStatus');
     const btn = document.getElementById('savebtn-'+sanitizeKey(code));
@@ -727,7 +710,7 @@ async function toggleLock(code){
 
     if(statusEl) statusEl.textContent = `"${code}" saved: row synced, image captured and uploaded.`;
     renderLog(); // resets the button out of its "Saving…" state, and shows the "✓ images saved" tag
-    armAddMode();
+    refreshCurrentPcBar();
   }
 }
 
@@ -739,6 +722,7 @@ function createPcMarkers(code){
     const marker = L.marker(pos, {icon: makePcIcon(PC_COLORS[i], angle, tickWidth), draggable:true, bubblingMouseEvents:false})
       .addTo(pc.markerLayer)
       .bindTooltip(PC_LABELS[i], {direction:'top', offset:[0,-8]});
+    marker.on('click', ()=>setSelectedPointCode(code));
 
     // every tick (building edge or footpath edge) only slides its own offset along the fixed
     // axis -- none of them can rotate or bend the line anymore. Rotation is the handle's job.
@@ -838,9 +822,35 @@ function addPointCode(clickLatLng){
   }
   if(matched){ matched.status = 'done'; renderPcList(); }
   disarmAddMode();
+  setSelectedPointCode(code);
 
   document.getElementById('pcHint').textContent = `"${code}" placed, snapped perpendicular to the nearest road${pcRegistry[code].roadName ? ' ('+pcRegistry[code].roadName+')' : ''}. Drag any tick to fine-tune.`;
 }
+
+let selectedPointCode = null;
+
+function setSelectedPointCode(code){
+  selectedPointCode = code;
+  refreshCurrentPcBar();
+}
+
+function refreshCurrentPcBar(){
+  const bar = document.getElementById('currentPcBar');
+  if(!selectedPointCode || !pcRegistry[selectedPointCode]){ bar.style.display = 'none'; return; }
+  const pc = pcRegistry[selectedPointCode];
+  bar.style.display = 'block';
+  document.getElementById('currentPcLabel').textContent = selectedPointCode + (pc.locked ? ' (locked)' : ' (editing)');
+  document.getElementById('currentPcSaveBtn').textContent = pc.locked ? '✏️ Edit' : '💾 Save (photo + sheet)';
+}
+
+document.addEventListener('keydown', e=>{
+  if(e.key !== 'Enter') return;
+  const tag = document.activeElement ? document.activeElement.tagName : '';
+  if(tag==='INPUT' || tag==='TEXTAREA') return; // don't hijack Enter while typing in a field
+  if(!selectedPointCode || !pcRegistry[selectedPointCode]) return;
+  e.preventDefault();
+  toggleLock(selectedPointCode);
+});
 
 let addMode = false;
 function toggleMode(){
@@ -899,6 +909,7 @@ async function deleteRecord(code){
   if(idx>-1) records.splice(idx,1);
   if(pcRegistry[code]){ map.removeLayer(pcRegistry[code].group); delete pcRegistry[code]; }
   delete imageMeta[code];
+  if(selectedPointCode===code){ selectedPointCode=null; refreshCurrentPcBar(); }
   try{ await window.storage.delete('xsec:'+sanitizeKey(code), false); }catch(err){}
   try{ await window.storage.delete('imgmeta:'+sanitizeKey(code), false); }catch(err){}
   renderLog();
@@ -952,7 +963,7 @@ async function loadSaved(){
         createRotateHandle(d.pointCode);
         createMoveHandle(d.pointCode);
         createActionIcon(d.pointCode);
-        if(pcRegistry[d.pointCode].locked) map.removeLayer(markerLayer);
+        if(pcRegistry[d.pointCode].locked) setMarkersInteractive(pcRegistry[d.pointCode], false);
         redrawPc(d.pointCode);
         records.push({pointCode:d.pointCode, roadName:d.roadName||'', footpathA_m:d.footpathA_m, carriageway_m:d.carriageway_m, footpathB_m:d.footpathB_m, row_total_m:d.row_total_m, latlngs:d.latlngs, nominalLat:nominalCenter.lat, nominalLng:nominalCenter.lng, offsetFromNominal_m:d.offsetFromNominal_m||0, savedAt:d.savedAt, locked: !!d.locked});
       }catch(err){ console.error('load fail', key, err); }
