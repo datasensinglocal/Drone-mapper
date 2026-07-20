@@ -63,6 +63,9 @@
   .pc-action-hit{width:26px;height:26px;border-radius:6px;background:#fff;border:2px solid #000;
     box-shadow:0 0 4px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;
     font-size:13px;cursor:pointer;}
+  .pc-move-hit{width:16px;height:16px;border-radius:50%;background:#e0453a;border:2px solid #fff;
+    box-shadow:0 0 4px rgba(0,0,0,.7);cursor:grab;}
+  .pc-move-hit:active{cursor:grabbing;}
   .pc-list-item{display:flex;align-items:center;justify-content:space-between;gap:6px;
     padding:6px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:4px;
     font-size:11.5px;cursor:pointer;background:var(--panel2);}
@@ -97,8 +100,13 @@
           <option value="osm">OSM</option>
           <option value="sat">Esri Satellite</option>
           <option value="wms">BBMP WMS overlay</option>
+          <option value="local">Local imagery (offline backup)</option>
         </select>
       </div>
+      <label class="filebtn" style="margin-top:8px;"><button onclick="document.getElementById('localImageryInput').click()">Upload local imagery (manifest + PNGs)</button></label>
+      <input type="file" id="localImageryInput" multiple accept=".json,.png"/>
+      <button class="danger" style="margin-top:6px;" onclick="clearLocalImagery()">Clear local imagery</button>
+      <div class="hint" id="localImageryStatus"></div>
     </div>
 
     <div class="sec">
@@ -171,12 +179,56 @@ const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Wo
 const wms = L.tileLayer.wms(WMS_URL, {layers: WMS_LAYER, format:'image/png', transparent:true, version:'1.1.1', maxZoom:22, crossOrigin:true});
 let activeBaseLayer = osm;
 
+const localImageryLayer = L.layerGroup(); // populated once the person uploads manifest+PNGs
+
 document.getElementById('baseSelect').addEventListener('change', e=>{
-  [osm,sat,wms].forEach(l=>map.removeLayer(l));
+  [osm,sat,wms,localImageryLayer].forEach(l=>map.removeLayer(l));
   if(e.target.value==='osm'){ osm.addTo(map); activeBaseLayer = osm; }
   if(e.target.value==='sat'){ sat.addTo(map); activeBaseLayer = sat; }
   if(e.target.value==='wms'){ wms.addTo(map); activeBaseLayer = wms; }
+  if(e.target.value==='local'){ localImageryLayer.addTo(map); activeBaseLayer = localImageryLayer; }
 });
+
+// local imagery: person selects manifest.json + all its PNG tiles together (multi-select).
+// Each tile becomes a positioned L.imageOverlay using the lat/lng bounds computed by
+// convert_tiles_for_offline_use.py -- this is the offline fallback if the WMS server
+// ever becomes unavailable.
+document.getElementById('localImageryInput').addEventListener('change', async e=>{
+  const files = Array.from(e.target.files);
+  const statusEl = document.getElementById('localImageryStatus');
+  const manifestFile = files.find(f=>f.name.toLowerCase().endsWith('.json'));
+  const pngFiles = files.filter(f=>f.name.toLowerCase().endsWith('.png'));
+
+  if(!manifestFile){
+    statusEl.textContent = 'No manifest.json found in your selection -- select it together with the PNG tiles.';
+    return;
+  }
+
+  statusEl.textContent = 'Loading local imagery…';
+  const manifestText = await manifestFile.text();
+  let manifest;
+  try{ manifest = JSON.parse(manifestText); }
+  catch(err){ statusEl.textContent = 'Could not parse manifest.json: ' + err.message; return; }
+
+  const pngByName = {};
+  pngFiles.forEach(f=>{ pngByName[f.name] = f; });
+
+  let loaded = 0, missing = 0;
+  manifest.tiles.forEach(t=>{
+    const file = pngByName[t.file];
+    if(!file){ missing++; return; }
+    const url = URL.createObjectURL(file);
+    L.imageOverlay(url, t.bounds).addTo(localImageryLayer);
+    loaded++;
+  });
+
+  statusEl.textContent = `Loaded ${loaded} local tile(s)${missing ? `, ${missing} referenced in the manifest were not selected` : ''} (added to any already loaded). Switch the basemap dropdown to "Local imagery" to view them.`;
+});
+
+function clearLocalImagery(){
+  localImageryLayer.clearLayers();
+  document.getElementById('localImageryStatus').textContent = 'Local imagery cleared.';
+}
 
 // ---- KML -> GeoJSON (minimal, handles BBMP-style exports) ----
 function kmlToGeoJSON(kmlText){
@@ -470,8 +522,6 @@ function redrawPc(code){
     L.circleMarker(pos, {radius:0, opacity:0, fillOpacity:0}).addTo(pc.visualLayer)
       .bindTooltip(text, {permanent:true, direction:'top', offset:[0,-4], className:'dim-label'});
   });
-  L.circleMarker(midpoint(pFA,pFB), {radius:5, color:'#e0453a', fillColor:'#e0453a', fillOpacity:1, weight:2}).addTo(pc.visualLayer)
-    .bindTooltip(code, {permanent:true, direction:'bottom', offset:[0,10], className:'pc-label'});
 
   return {footpathA_m:fA, carriageway_m:cw, footpathB_m:fB, row_total_m:row};
 }
@@ -481,7 +531,9 @@ function sanitizeKey(code){ return code.replace(/[\s\/\\'"]/g, '_').slice(0,150)
 async function savePc(code){
   const pc = pcRegistry[code];
   const m = redrawPc(code);
-  const rec = {pointCode: code, roadName: pc.roadName || '', ...m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})), savedAt: new Date().toISOString(), locked: !!pc.locked};
+  const rec = {pointCode: code, roadName: pc.roadName || '', ...m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
+    nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
+    savedAt: new Date().toISOString(), locked: !!pc.locked};
   const existing = records.findIndex(r=>r.pointCode===code);
   if(existing>-1) records[existing]=rec; else records.push(rec);
   renderLog();
@@ -496,7 +548,9 @@ async function savePc(code){
 function refreshRecordDisplay(code){
   const pc = pcRegistry[code];
   const m = redrawPc(code);
-  const rec = {pointCode: code, roadName: pc.roadName || '', ...m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})), savedAt: (records.find(r=>r.pointCode===code)||{}).savedAt, locked: !!pc.locked};
+  const rec = {pointCode: code, roadName: pc.roadName || '', ...m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
+    nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
+    savedAt: (records.find(r=>r.pointCode===code)||{}).savedAt, locked: !!pc.locked};
   const existing = records.findIndex(r=>r.pointCode===code);
   if(existing>-1) records[existing]=rec; else records.push(rec);
   renderLog();
@@ -576,6 +630,44 @@ function createRotateHandle(code){
   handle.on('drag', e=>applyRotation(e.target.getLatLng()));
   handle.on('dragend', e=>applyRotation(e.target.getLatLng()));
   pc.rotateHandle = handle;
+}
+
+const MAX_MOVE_FROM_NOMINAL_M = 50;
+
+// draggable point-code dot itself: lets you slide the whole cross-section a short distance
+// along the road (e.g. to dodge tree canopy at the exact nominal spot), re-snapping
+// perpendicular to whichever road segment is nearest each time. Clamped to 50m from the
+// original ("nominal") location -- the offset distance gets recorded for the record.
+function createMoveHandle(code){
+  const pc = pcRegistry[code];
+  const handle = L.marker(pc.center, {
+    icon: L.divIcon({className:'', html:'<div class="pc-move-hit"></div>', iconSize:[16,16], iconAnchor:[8,8]}),
+    draggable:true, bubblingMouseEvents:false
+  })
+    .addTo(pc.markerLayer)
+    .bindTooltip(code, {permanent:true, direction:'bottom', offset:[0,10], className:'pc-label'});
+
+  function applyMove(mouseLatLng){
+    const snap = findNearestRoadPoint(mouseLatLng);
+    if(!snap) return; // no road nearby at all -- ignore, keep last valid position
+    const candidateCenter = snap.point;
+    const distFromNominal = pc.nominalCenter.distanceTo(candidateCenter);
+    if(distFromNominal > MAX_MOVE_FROM_NOMINAL_M){
+      handle.setLatLng(pc.center); // refuse the move, snap the handle back visually
+      return;
+    }
+    pc.center = candidateCenter;
+    pc.dir = {x:-snap.tangent.ty, y:snap.tangent.tx};
+    pc.offsetFromNominal_m = distFromNominal;
+    syncPositionsFromAxis(pc);
+    handle.setLatLng(pc.center);
+    pc.markers.forEach((mk,i)=>mk.setLatLng(pc.positions[i]));
+    if(pc.rotateHandle) pc.rotateHandle.setLatLng(rotateHandlePos(pc));
+    refreshRecordDisplay(code); updateTickAngles(code);
+  }
+  handle.on('drag', e=>applyMove(e.target.getLatLng()));
+  handle.on('dragend', e=>applyMove(e.target.getLatLng()));
+  pc.moveHandle = handle;
 }
 
 function makeActionIcon(locked){
@@ -700,10 +792,11 @@ function createPointCodeAt(code, clickLatLng){
   const visualLayer = L.layerGroup().addTo(group);
   const markerLayer = L.layerGroup().addTo(group);
   const actionLayer = L.layerGroup().addTo(group);
-  pcRegistry[code] = {center, dir, offsets, group, visualLayer, markerLayer, actionLayer, locked:false, roadName: snap.props ? (snap.props.Road_CentrelineName||snap.props.name||'') : ''};
+  pcRegistry[code] = {center, dir, offsets, nominalCenter:center, offsetFromNominal_m:0, group, visualLayer, markerLayer, actionLayer, locked:false, roadName: snap.props ? (snap.props.Road_CentrelineName||snap.props.name||'') : ''};
   syncPositionsFromAxis(pcRegistry[code]);
   createPcMarkers(code);
   createRotateHandle(code);
+  createMoveHandle(code);
   createActionIcon(code);
   savePc(code);
   return {ok:true, distance:nearest.dist};
@@ -783,6 +876,7 @@ function typeLabelRow(r){
     `Carriageway: <span class="w">${r.carriageway_m.toFixed(2)} m</span><br>`+
     `Footpath B: <span class="w">${r.footpathB_m.toFixed(2)} m</span><br>`+
     `Total ROW: <span class="w">${r.row_total_m.toFixed(2)} m</span><br>`+
+    ((r.offsetFromNominal_m||0) > 0.5 ? `<span style="color:var(--accent2);">↕ moved ${r.offsetFromNominal_m.toFixed(1)}m from nominal</span><br>` : '')+
     `<button id="savebtn-${skey}" style="margin-top:6px;width:auto;padding:5px 9px;font-size:10.5px;" onclick="toggleLock('${r.pointCode}')">${locked ? '✏️ Edit' : '💾 Save (photo + sheet)'}</button>`+
     (img ? ` <span style="font-size:10px;color:var(--accent);">✓ images saved</span>` : '');
 }
@@ -851,14 +945,16 @@ async function loadSaved(){
         const visualLayer = L.layerGroup().addTo(dimLayer);
         const markerLayer = L.layerGroup().addTo(dimLayer);
         const actionLayer = L.layerGroup().addTo(dimLayer);
-        pcRegistry[d.pointCode] = {center:axis.center, dir:axis.dir, offsets:axis.offsets, group: dimLayer, visualLayer, markerLayer, actionLayer, locked: !!d.locked, roadName: d.roadName||''};
+        const nominalCenter = (d.nominalLat!==undefined && d.nominalLng!==undefined) ? L.latLng(d.nominalLat, d.nominalLng) : axis.center;
+        pcRegistry[d.pointCode] = {center:axis.center, dir:axis.dir, offsets:axis.offsets, nominalCenter, offsetFromNominal_m: d.offsetFromNominal_m||0, group: dimLayer, visualLayer, markerLayer, actionLayer, locked: !!d.locked, roadName: d.roadName||''};
         syncPositionsFromAxis(pcRegistry[d.pointCode]);
         createPcMarkers(d.pointCode);
         createRotateHandle(d.pointCode);
+        createMoveHandle(d.pointCode);
         createActionIcon(d.pointCode);
         if(pcRegistry[d.pointCode].locked) map.removeLayer(markerLayer);
         redrawPc(d.pointCode);
-        records.push({pointCode:d.pointCode, roadName:d.roadName||'', footpathA_m:d.footpathA_m, carriageway_m:d.carriageway_m, footpathB_m:d.footpathB_m, row_total_m:d.row_total_m, latlngs:d.latlngs, savedAt:d.savedAt, locked: !!d.locked});
+        records.push({pointCode:d.pointCode, roadName:d.roadName||'', footpathA_m:d.footpathA_m, carriageway_m:d.carriageway_m, footpathB_m:d.footpathB_m, row_total_m:d.row_total_m, latlngs:d.latlngs, nominalLat:nominalCenter.lat, nominalLng:nominalCenter.lng, offsetFromNominal_m:d.offsetFromNominal_m||0, savedAt:d.savedAt, locked: !!d.locked});
       }catch(err){ console.error('load fail', key, err); }
     }
     try{
@@ -1103,6 +1199,9 @@ function exportExcel(){
       'Footpath B width (m)': +r.footpathB_m.toFixed(2),
       'Total ROW (m)': +r.row_total_m.toFixed(2),
       'Road name': r.roadName || '',
+      'Offset from nominal (m)': +(r.offsetFromNominal_m||0).toFixed(1),
+      'Nominal latitude': r.nominalLat !== undefined ? +r.nominalLat.toFixed(6) : '',
+      'Nominal longitude': r.nominalLng !== undefined ? +r.nominalLng.toFixed(6) : '',
       'Image 1 (no annotation)': img.rawFilename || '',
       'Image 2 (annotated)': img.annotatedFilename || '',
       'Saved at': r.savedAt || ''
@@ -1144,7 +1243,8 @@ async function syncPointCodeToSheet(code){
     footpath_side_a: Number(rec.footpathA_m.toFixed(2)),
     carriage_way: Number(rec.carriageway_m.toFixed(2)),
     footpath_side_b: Number(rec.footpathB_m.toFixed(2)),
-    row_total: Number(rec.row_total_m.toFixed(2))
+    row_total: Number(rec.row_total_m.toFixed(2)),
+    offset_distance: Number((rec.offsetFromNominal_m||0).toFixed(1))
   };
   try{
     // text/plain content-type avoids a CORS preflight that Apps Script Web Apps don't handle;
@@ -1192,16 +1292,16 @@ function exportData(fmt){
   if(fmt==='geojson'){
     const features = records.map(r=>({
       type:'Feature',
-      properties:{point_code:r.pointCode, road_name:r.roadName, footpathA_m:r.footpathA_m, carriageway_m:r.carriageway_m, footpathB_m:r.footpathB_m, row_total_m:r.row_total_m, saved_at:r.savedAt||''},
+      properties:{point_code:r.pointCode, road_name:r.roadName, footpathA_m:r.footpathA_m, carriageway_m:r.carriageway_m, footpathB_m:r.footpathB_m, row_total_m:r.row_total_m, offset_from_nominal_m:r.offsetFromNominal_m||0, nominal_lat:r.nominalLat, nominal_lng:r.nominalLng, saved_at:r.savedAt||''},
       geometry:{type:'LineString', coordinates:r.latlngs.map(p=>[p.lng,p.lat])}
     }));
     content = JSON.stringify({type:'FeatureCollection', features}, null, 2);
     mime='application/geo+json'; ext='geojson';
   } else {
-    const rows = ['point_code,footpathA_m,carriageway_m,footpathB_m,row_total_m,road_name,lat_buildingA,lng_buildingA,lat_buildingB,lng_buildingB'];
+    const rows = ['point_code,footpathA_m,carriageway_m,footpathB_m,row_total_m,road_name,offset_from_nominal_m,nominal_lat,nominal_lng,lat_buildingA,lng_buildingA,lat_buildingB,lng_buildingB'];
     records.forEach(r=>{
       const p1=r.latlngs[0], p2=r.latlngs[3];
-      rows.push([`"${r.pointCode.replace(/"/g,'""')}"`, r.footpathA_m.toFixed(3), r.carriageway_m.toFixed(3), r.footpathB_m.toFixed(3), r.row_total_m.toFixed(3), `"${(r.roadName||'').replace(/"/g,'""')}"`, p1.lat, p1.lng, p2.lat, p2.lng].join(','));
+      rows.push([`"${r.pointCode.replace(/"/g,'""')}"`, r.footpathA_m.toFixed(3), r.carriageway_m.toFixed(3), r.footpathB_m.toFixed(3), r.row_total_m.toFixed(3), `"${(r.roadName||'').replace(/"/g,'""')}"`, (r.offsetFromNominal_m||0).toFixed(1), r.nominalLat??'', r.nominalLng??'', p1.lat, p1.lng, p2.lat, p2.lng].join(','));
     });
     content = rows.join('\n');
     mime='text/csv'; ext='csv';
