@@ -522,6 +522,7 @@ async function savePc(code){
   const m = redrawPc(code);
   const rec = {pointCode: code, roadName: pc.roadName || '', ...m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
     nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
+    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null,
     savedAt: new Date().toISOString(), locked: !!pc.locked};
   const existing = records.findIndex(r=>r.pointCode===code);
   if(existing>-1) records[existing]=rec; else records.push(rec);
@@ -539,6 +540,7 @@ function refreshRecordDisplay(code){
   const m = redrawPc(code);
   const rec = {pointCode: code, roadName: pc.roadName || '', ...m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
     nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
+    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null,
     savedAt: (records.find(r=>r.pointCode===code)||{}).savedAt, locked: !!pc.locked};
   const existing = records.findIndex(r=>r.pointCode===code);
   if(existing>-1) records[existing]=rec; else records.push(rec);
@@ -981,7 +983,8 @@ async function loadSaved(){
         const markerLayer = L.layerGroup().addTo(dimLayer);
         const actionLayer = L.layerGroup().addTo(dimLayer);
         const nominalCenter = (d.nominalLat!==undefined && d.nominalLng!==undefined) ? L.latLng(d.nominalLat, d.nominalLng) : axis.center;
-        pcRegistry[d.pointCode] = {center:axis.center, dir:axis.dir, offsets:axis.offsets, nominalCenter, offsetFromNominal_m: d.offsetFromNominal_m||0, group: dimLayer, visualLayer, markerLayer, actionLayer, locked: !!d.locked, roadName: d.roadName||''};
+        pcRegistry[d.pointCode] = {center:axis.center, dir:axis.dir, offsets:axis.offsets, nominalCenter, offsetFromNominal_m: d.offsetFromNominal_m||0, group: dimLayer, visualLayer, markerLayer, actionLayer, locked: !!d.locked, roadName: d.roadName||'',
+          sCode: d.sCode || '', pointCode: (d.rawPointCode !== undefined && d.rawPointCode !== null) ? d.rawPointCode : undefined};
         syncPositionsFromAxis(pcRegistry[d.pointCode]);
         createPcMarkers(d.pointCode);
         createRotateHandle(d.pointCode);
