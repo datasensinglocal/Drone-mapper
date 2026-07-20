@@ -347,6 +347,16 @@ document.getElementById('pcListInput').addEventListener('change', e=>{
           properties: f.properties || {}
         };
       });
+      // heal any already-placed point codes that predate the sCode/pointCode persistence fix --
+      // they'd otherwise keep sending blank s_code/point_code to the sheet forever.
+      let healed = 0;
+      pointCodeList.forEach(entry=>{
+        const pc = pcRegistry[entry.code];
+        if(pc && !pc.sCode && !pc.pointCode && (entry.sCode || entry.pointCode !== entry.code)){
+          pc.sCode = entry.sCode; pc.pointCode = entry.pointCode; healed++;
+        }
+      });
+      if(healed>0) console.log(`Backfilled sCode/pointCode for ${healed} previously-placed point code(s).`);
       renderPcList();
       document.getElementById('pcListContainer').style.display = 'block';
       if(pointCodeList.length){
@@ -384,6 +394,10 @@ function searchGo(){
   let code = Object.keys(pcRegistry).find(c=>c.toLowerCase()===lower);
   if(!code) code = Object.keys(pcRegistry).find(c=>c.toLowerCase().includes(lower));
   if(code){
+    if(!pcRegistry[code].sCode && !pcRegistry[code].pointCode){
+      const listEntry = pointCodeList.find(p=>p.code===code);
+      if(listEntry){ pcRegistry[code].sCode = listEntry.sCode; pcRegistry[code].pointCode = listEntry.pointCode; }
+    }
     map.setView(pcRegistry[code].center, Math.max(map.getZoom(), 20));
     flashPc(code);
     return;
@@ -425,6 +439,12 @@ function generateFromList(idx){
 
   if(pcRegistry[entry.code]){
     // already placed -- just bring it into view and select it for the Save bar, don't regenerate
+    // backfill sCode/pointCode if this point code predates that fix (was created before these
+    // were persisted) -- otherwise it would silently keep sending blank values forever.
+    if(!pcRegistry[entry.code].sCode && !pcRegistry[entry.code].pointCode){
+      pcRegistry[entry.code].sCode = entry.sCode;
+      pcRegistry[entry.code].pointCode = entry.pointCode;
+    }
     map.setView(pcRegistry[entry.code].center, Math.max(map.getZoom(), 19));
     setSelectedPointCode(entry.code);
     return;
