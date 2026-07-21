@@ -81,7 +81,8 @@
   <div id="panel">
     <div class="ph">
       <h1>Point Code Cross-Section</h1>
-      <p>Click a point code, drag its 4 edges to fit — auto-saves</p>
+      <p>Click a point code, drag its 4 edges to fit</p>
+      <p style="font-size:10px;color:var(--accent);margin-top:2px;">BUILD: combined-save-v1 · 2026-07-21</p>
     </div>
 
     <div class="sec">
@@ -1317,8 +1318,6 @@ async function saveEverythingToSheet(code){
     const cap = await captureDroneImageCanvas(code);
     rawBase64 = cap.rawCanvas.toDataURL('image/png');
     annBase64 = cap.annCanvas.toDataURL('image/png');
-    await downloadCanvasPng(cap.rawCanvas, rawName);
-    await downloadCanvasPng(cap.annCanvas, annName);
     capturedOk = true;
   }catch(err){
     console.error('drone image capture failed, saving sheet row without images', code, err);
