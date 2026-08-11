@@ -1,0 +1,11 @@
+# whitelist-style: ignore everything at the root by default, then explicitly un-ignore
+# only what actually belongs in this repo (index.html + db-backend/).
+/*
+!/index.html
+!/db-backend
+!/.gitignore
+
+# inside db-backend, still exclude secrets and generated/local-only stuff
+/db-backend/.env
+/db-backend/venv/
+/db-backend/__pycache__/

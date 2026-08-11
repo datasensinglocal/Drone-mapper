@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Point Code Cross-Section</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  :root{
+    --bg:#0f1512; --panel:#16201b; --panel2:#1c2921; --line:#2a3b31;
+    --ink:#e9f2ec; --ink-dim:#9db3a6; --accent:#5fbf8a; --accent2:#e0a458;
+    --danger:#d9695a; --mono:'SF Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:'Segoe UI',system-ui,sans-serif;}
+  #app{display:flex;height:100vh;}
+  #map{flex:1;background:#0a0e0b;}
+  #panel{width:320px;background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;}
+  .ph{padding:14px 16px;border-bottom:1px solid var(--line);}
+  .ph h1{font-size:15px;margin:0 0 2px;letter-spacing:.02em;}
+  .ph p{margin:0;font-size:11.5px;color:var(--ink-dim);}
+  .sec{padding:12px 16px;border-bottom:1px solid var(--line);}
+  .sec h2{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin:0 0 8px;}
+  button{font-family:inherit;font-size:12px;border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+    padding:9px 10px;border-radius:6px;cursor:pointer;text-align:left;transition:.12s;width:100%;}
+  button:hover{border-color:var(--accent);}
+  button.active{background:var(--accent);color:#08130d;border-color:var(--accent);font-weight:600;}
+  button.danger:hover{border-color:var(--danger);}
+  .filebtn{display:block;width:100%;}
+  input[type=file]{display:none;}
+  select,input[type=text]{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:7px 8px;border-radius:6px;font-size:12px;font-family:inherit;}
+  .row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+  .row label{font-size:11px;color:var(--ink-dim);width:100px;flex-shrink:0;}
+  .row input{width:70px;flex:none;}
+  #log{flex:1;min-height:220px;overflow-y:auto;padding:10px 16px;font-family:var(--mono);font-size:11px;}
+  .entry{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-bottom:6px;}
+  .entry .k{color:var(--accent);font-weight:600;}
+  .entry .w{color:var(--accent2);}
+  .entry .del{float:right;color:var(--danger);cursor:pointer;font-size:10px;}
+  .hint{font-size:11px;color:var(--ink-dim);line-height:1.5;margin-top:6px;}
+  .badge{display:inline-block;background:var(--accent);color:#08130d;font-size:10px;font-weight:700;
+    padding:1px 6px;border-radius:4px;margin-left:4px;}
+  .foot{padding:10px 16px;border-top:1px solid var(--line);display:flex;gap:6px;}
+  .foot button{flex:1;text-align:center;}
+  .leaflet-container{background:#0a0e0b;}
+  .dim-label{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;
+    color:#fff;font-weight:700;font-size:12.5px;font-family:'Segoe UI',system-ui,sans-serif;
+    text-shadow:-1.5px -1.5px 2px #000,1.5px -1.5px 2px #000,-1.5px 1.5px 2px #000,1.5px 1.5px 2px #000,0 0 4px #000;
+    pointer-events:none;}
+  .dim-label::before{display:none!important;}
+  .pc-label{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;
+    color:#e0453a;font-weight:700;font-size:12px;font-family:'Segoe UI',system-ui,sans-serif;
+    text-shadow:-1px -1px 2px #fff,1px -1px 2px #fff,-1px 1px 2px #fff,1px 1px 2px #fff;pointer-events:none;}
+  .pc-label::before{display:none!important;}
+  .pc-tick-hit{position:absolute;left:50%;top:50%;width:22px;height:22px;margin-left:-11px;margin-top:-11px;border-radius:50%;cursor:grab;}
+  .pc-tick-hit:active{cursor:grabbing;}
+  .pc-tick-bar{position:absolute;left:50%;top:50%;width:4px;height:24px;margin-left:-2px;margin-top:-12px;
+    border:1px solid #000;border-radius:2px;box-shadow:0 0 3px rgba(0,0,0,.7);pointer-events:none;}
+  .pc-rotate-hit{width:26px;height:26px;border-radius:50%;background:#7ab8e0;border:2px solid #000;
+    box-shadow:0 0 4px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;
+    cursor:grab;}
+  .pc-rotate-hit:active{cursor:grabbing;}
+  .pc-action-hit{width:26px;height:26px;border-radius:6px;background:#fff;border:2px solid #000;
+    box-shadow:0 0 4px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;
+    font-size:13px;cursor:pointer;}
+  .pc-move-hit{width:16px;height:16px;border-radius:50%;background:#e0453a;border:2px solid #fff;
+    box-shadow:0 0 4px rgba(0,0,0,.7);cursor:grab;}
+  .pc-move-hit:active{cursor:grabbing;}
+  .pc-list-item{display:flex;align-items:center;justify-content:space-between;gap:6px;
+    padding:6px 8px;border:1px solid var(--line);border-radius:5px;margin-bottom:4px;
+    font-size:11.5px;cursor:pointer;background:var(--panel2);}
+  .pc-list-item:hover{border-color:var(--accent);}
+  .pc-list-item.done{opacity:0.55;}
+  .pc-list-item .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+  .pc-list-item .code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <div id="panel">
+    <div class="ph">
+      <h1>Point Code Cross-Section</h1>
+      <p>Click a point code, drag its 4 edges to fit</p>
+      <p style="font-size:10px;color:var(--accent);margin-top:2px;">BUILD: header-fix-2026-07-22</p>
+    </div>
+
+    <div class="sec">
+      <h2>Find a point code</h2>
+      <div class="row" style="margin-bottom:0;">
+        <input type="text" id="searchInput" list="pcCodeOptions" placeholder="Type a point code…" style="flex:1;" onkeydown="if(event.key==='Enter') searchGo();"/>
+        <button style="width:auto;padding:8px 12px;" onclick="searchGo()">Go</button>
+      </div>
+      <datalist id="pcCodeOptions"></datalist>
+    </div>
+
+    <div class="sec">
+      <h2>Basemap</h2>
+      <div class="row"><label>Layer</label>
+        <select id="baseSelect" style="width:auto;flex:1;">
+          <option value="osm">OSM</option>
+          <option value="sat">Esri Satellite</option>
+          <option value="wms">BBMP WMS overlay</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Road network (required)</h2>
+      <label class="filebtn"><button onclick="document.getElementById('geojsonInput').click()">Upload GeoJSON or KML</button></label>
+      <input type="file" id="geojsonInput" accept=".geojson,.json,.kml"/>
+    </div>
+
+    <div class="sec">
+      <h2>Point code list (optional)</h2>
+      <label class="filebtn"><button onclick="document.getElementById('pcListInput').click()">Upload point codes (GeoJSON or KML)</button></label>
+      <input type="file" id="pcListInput" accept=".geojson,.json,.kml"/>
+      <div id="pcListContainer" style="display:none;margin-top:8px;">
+        <div class="row"><label style="width:auto;">Codes</label><span class="badge" id="pcListStatus">0/0</span></div>
+        <div id="pcList" style="max-height:180px;overflow-y:auto;"></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Point codes</h2>
+      <button id="mode-pc" onclick="toggleMode()">Add point code</button>
+      <div class="hint" id="pcHint"></div>
+      <div id="currentPcBar" style="display:none;margin-top:10px;padding:8px;border:1px solid var(--accent);border-radius:6px;background:var(--panel2);">
+        <div class="row" style="margin-bottom:0;">
+          <span id="currentPcLabel" style="flex:1;font-size:12px;font-weight:600;"></span>
+          <button id="currentPcSaveBtn" style="width:auto;padding:6px 10px;" onclick="toggleLock(selectedPointCode)"></button>
+        </div>
+        <div class="row" style="margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;flex:1;">
+            <input type="checkbox" id="currentPcMedianToggle" onchange="setMedianMode(selectedPointCode, this.checked)"/>
+            Road has a median (splits road width into side A / median / side B)
+          </label>
+        </div>
+        <div class="row" id="currentPcMedianHeightRow" style="display:none;margin-top:4px;">
+          <label>Median height</label>
+          <input type="text" id="currentPcMedianHeight" oninput="setMedianHeight(selectedPointCode, this.value)"/>
+          <span style="font-size:11px;color:var(--ink-dim);">m</span>
+        </div>
+        <div class="hint" style="margin-top:4px;">Click any point code's scale on the map to select it here. Press Enter to Save/Edit the selected one.</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <details>
+        <summary style="cursor:pointer;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);">Settings</summary>
+        <div style="margin-top:8px;">
+          <div class="row"><label>Guide length</label>
+            <input type="text" id="guideLen" value="30"/><span style="font-size:11px;color:var(--ink-dim);">m</span>
+          </div>
+          <div class="row"><label>Image buffer</label>
+            <input type="text" id="imgBuffer" value="25"/><span style="font-size:11px;color:var(--ink-dim);">m each side</span>
+          </div>
+          <div class="hint" id="captureAllStatus"></div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);">
+            <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin-bottom:6px;">Drive image upload (Apps Script)</div>
+            <input type="text" id="sheetSyncUrl" value="https://script.google.com/macros/s/AKfycbyZBY1zjUQDiziVfF-Rxn_V8gc5n-HP83uAxLALf2TUhp-gm63g4c4B5ukyw8vsFNTB/exec" style="margin-bottom:6px;"/>
+            <div class="hint">Only used for uploading the raw/annotated drone screenshots to Drive. Measurement data no longer goes here.</div>
+          </div>
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);">
+            <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin-bottom:6px;">Database backend</div>
+            <input type="text" id="dbBackendUrl" placeholder="https://your-backend.onrender.com" style="margin-bottom:6px;"/>
+            <input type="text" id="dbApiToken" placeholder="API token" style="margin-bottom:6px;"/>
+            <button onclick="syncAllToDb()">Re-sync all saved point codes to database (fallback)</button>
+            <div class="hint" id="dbSyncStatus"></div>
+            <div style="margin-top:8px;">
+              <label class="hint" style="display:block;margin-bottom:4px;">Last payload sent to the database (debug):</label>
+              <pre id="lastPayloadPreview" style="font-size:10px;background:var(--panel-2,#1a1a1a);border:1px solid var(--line);border-radius:4px;padding:6px;max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0;">(nothing sent yet)</pre>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="sec">
+      <h2>Saved <span class="badge" id="savedCount">0</span></h2>
+      <button class="danger" onclick="clearAllSaved()">Clear all saved point codes</button>
+    </div>
+
+    <div id="log"></div>
+
+    <div class="foot">
+      <button onclick="exportData('geojson')">GeoJSON</button>
+      <button onclick="exportData('csv')">CSV</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const WMS_URL   = 'https://rdgis.karnataka.gov.in/geoserver/wms';
+const WMS_LAYER = 'BU_bbmp_U:BU_bbmp_U';
+
+const map = L.map('map', {zoomControl:true}).setView([13.0067, 77.5978], 17);
+
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:22, maxNativeZoom:19, attribution:'OSM', crossOrigin:true}).addTo(map);
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:22, maxNativeZoom:19, attribution:'Esri', crossOrigin:true});
+const wms = L.tileLayer.wms(WMS_URL, {layers: WMS_LAYER, format:'image/png', transparent:true, version:'1.1.1', maxZoom:22, crossOrigin:true});
+let activeBaseLayer = osm;
+
+document.getElementById('baseSelect').addEventListener('change', e=>{
+  [osm,sat,wms].forEach(l=>map.removeLayer(l));
+  if(e.target.value==='osm'){ osm.addTo(map); activeBaseLayer = osm; }
+  if(e.target.value==='sat'){ sat.addTo(map); activeBaseLayer = sat; }
+  if(e.target.value==='wms'){ wms.addTo(map); activeBaseLayer = wms; }
+});
+
+// ---- KML -> GeoJSON (minimal, handles BBMP-style exports) ----
+function kmlToGeoJSON(kmlText){
+  const xml = new DOMParser().parseFromString(kmlText, 'text/xml');
+  const err = xml.querySelector('parsererror');
+  if(err) throw new Error('XML parse error: ' + err.textContent.slice(0,200));
+  function parseCoords(text){
+    return text.trim().split(/\s+/).map(pair=>{
+      const parts = pair.split(',').map(Number);
+      return parts.length >= 3 ? [parts[0], parts[1], parts[2]] : [parts[0], parts[1]];
+    });
+  }
+  function geomFromEl(el){
+    const tag = el.tagName;
+    if(tag === 'LineString'){ const c = el.querySelector('coordinates'); return c ? {type:'LineString', coordinates: parseCoords(c.textContent)} : null; }
+    if(tag === 'Point'){ const c = el.querySelector('coordinates'); return c ? {type:'Point', coordinates: parseCoords(c.textContent)[0]} : null; }
+    if(tag === 'Polygon'){
+      const outer = el.querySelector('outerBoundaryIs LinearRing coordinates');
+      if(!outer) return null;
+      const rings = [parseCoords(outer.textContent)];
+      el.querySelectorAll('innerBoundaryIs LinearRing coordinates').forEach(ic=>rings.push(parseCoords(ic.textContent)));
+      return {type:'Polygon', coordinates: rings};
+    }
+    if(tag === 'MultiGeometry'){
+      const geoms = Array.from(el.children).map(geomFromEl).filter(Boolean);
+      if(geoms.length===0) return null;
+      if(geoms.every(g=>g.type==='LineString')) return {type:'MultiLineString', coordinates: geoms.map(g=>g.coordinates)};
+      return {type:'GeometryCollection', geometries: geoms};
+    }
+    return null;
+  }
+  const features = [];
+  xml.querySelectorAll('Placemark').forEach(pm=>{
+    const props = {};
+    const nameEl = pm.querySelector(':scope > name');
+    if(nameEl) props.name = nameEl.textContent;
+    pm.querySelectorAll('SimpleData').forEach(sd=>{ props[sd.getAttribute('name')] = sd.textContent; });
+    const geomEl = pm.querySelector('LineString, Point, Polygon, MultiGeometry');
+    if(!geomEl) return;
+    const geometry = geomFromEl(geomEl);
+    if(!geometry) return;
+    features.push({type:'Feature', properties: props, geometry});
+  });
+  return {type:'FeatureCollection', features};
+}
+
+let roadLayer = null;
+document.getElementById('geojsonInput').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const isKML = /\.kml$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    try{
+      const gj = isKML ? kmlToGeoJSON(ev.target.result) : JSON.parse(ev.target.result);
+      if(gj.features.length === 0) throw new Error('No usable features found in file.');
+      if(roadLayer) map.removeLayer(roadLayer);
+      roadLayer = L.geoJSON(gj, {
+        renderer: L.canvas({padding: 0.5}),
+        style: f => ({color: (f.properties && f.properties.Road_Class==='07') ? '#5a6b60' : '#e0a458', weight: 2, opacity: 0.85})
+      }).addTo(map);
+      map.fitBounds(roadLayer.getBounds());
+    }catch(err){ alert('Could not parse file: '+err.message); }
+  };
+  reader.readAsText(file);
+});
+
+// ---- local equirectangular meter conversion (accurate for short distances) ----
+function mPerDegLat(){ return 111320; }
+function mPerDegLng(lat){ return 111320 * Math.cos(lat * Math.PI/180); }
+function llToXY(latlng, originLat){ return {x: latlng.lng * mPerDegLng(originLat), y: latlng.lat * mPerDegLat()}; }
+function xyToLL(x, y, originLat){ return L.latLng(y / mPerDegLat(), x / mPerDegLng(originLat)); }
+
+// true spherical Web Mercator (EPSG:3857) -- needed for an accurate WMS BBOX, distinct from
+// the local equirectangular approximation above (which is only valid for short on-map distances).
+const MERC_R = 6378137;
+function lngToMercX(lng){ return lng * Math.PI/180 * MERC_R; }
+function latToMercY(lat){ return Math.log(Math.tan(Math.PI/4 + lat*Math.PI/360)) * MERC_R; }
+
+function findNearestRoadPoint(clickLatLng){
+  if(!roadLayer) return null;
+  const originLat = clickLatLng.lat;
+  const click = llToXY(clickLatLng, originLat);
+  let best = null;
+  roadLayer.eachLayer(layer=>{
+    let latlngsArr = layer.getLatLngs ? layer.getLatLngs() : null;
+    if(!latlngsArr) return;
+    let lines = Array.isArray(latlngsArr[0]) ? latlngsArr : [latlngsArr];
+    lines.forEach(line=>{
+      for(let i=0;i<line.length-1;i++){
+        const a = llToXY(line[i], originLat), b = llToXY(line[i+1], originLat);
+        const dx=b.x-a.x, dy=b.y-a.y, len2=dx*dx+dy*dy;
+        if(len2===0) continue;
+        let t = ((click.x-a.x)*dx + (click.y-a.y)*dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px=a.x+t*dx, py=a.y+t*dy, d=Math.hypot(click.x-px, click.y-py);
+        if(!best || d<best.dist){ const tlen=Math.hypot(dx,dy); best = {dist:d, x:px, y:py, tx:dx/tlen, ty:dy/tlen, props: layer.feature?layer.feature.properties:{}}; }
+      }
+    });
+  });
+  if(!best) return null;
+  return {dist: best.dist, point: xyToLL(best.x, best.y, originLat), tangent:{tx:best.tx, ty:best.ty}, originLat, props: best.props};
+}
+
+function nearestPointOnRoads(clickLatLng, maxSnapM){
+  const best = findNearestRoadPoint(clickLatLng);
+  if(!best || best.dist > maxSnapM) return null;
+  return best;
+}
+
+// ---- point-code cross-section: 4 independently draggable markers, live-redrawn dimension line ----
+// label/color depend on position in the line, not a fixed index, since a point code can have
+// either 4 markers (no median) or 6 (median present, 2 extra edges splitting the carriageway).
+// Order is always: Building A, Footpath A, [Median A, Median B], Footpath B, Building B.
+function pcLabelFor(i, n){
+  if(i===0) return 'Building edge A';
+  if(i===n-1) return 'Building edge B';
+  if(i===1) return 'Footpath edge A';
+  if(i===n-2) return 'Footpath edge B';
+  if(i===2) return 'Median edge A';
+  return 'Median edge B';
+}
+function pcColorFor(i, n){
+  if(i===0 || i===n-1) return '#e0a458'; // building edges
+  if(i===1 || i===n-2) return '#5fbf8a'; // footpath edges
+  return '#6a9fd8'; // median edges
+}
+const pcRegistry = {}; // pointCode -> {positions:[LatLng x4], markers:[], group, roadName}
+let pointCodeList = []; // [{code, latlng, status:'pending'|'done', properties}]
+const imageMeta = {}; // pointCode -> {rawFilename, annotatedFilename, capturedAt}
+
+const PC_CODE_KEYS = ['point_code','Point_Code','PointCode','pointcode','code','Code','ID','id','S_Code','SCode','name'];
+
+function extractPcCode(props, fallbackIndex){
+  for(const key of PC_CODE_KEYS){
+    if(props && props[key] !== undefined && String(props[key]).trim() !== '') return String(props[key]).trim();
+  }
+  return 'PC-' + (fallbackIndex+1);
+}
+
+// builds a unique tool identifier + retains the raw s_code/point_code values separately.
+// point_code alone is only unique WITHIN one s_code (e.g. point_code=8 exists under many
+// different s_codes) -- so the map/tool identifier combines both, while the raw values are
+// kept for writing into their own separate sheet columns later.
+const S_CODE_KEYS = ['s_code','S_Code','SCode','scode'];
+const POINT_CODE_ONLY_KEYS = ['point_code','Point_Code','PointCode','pointcode'];
+
+// property key lookup is case/underscore-variant tolerant -- GIS exports (GeoJSON/KML) commonly
+// use S_Code/Point_Code (capitalized) rather than the lowercase s_code/point_code used elsewhere,
+// and a strict exact-key check here silently dropped s_code for any file using those variants.
+function extractPropByKeys(props, keys){
+  if(!props) return undefined;
+  for(const key of keys){
+    if(props[key] !== undefined && String(props[key]).trim() !== '') return String(props[key]).trim();
+  }
+  return undefined;
+}
+
+// the database's audit_infrastructure.code (our "S-code") is only unique WITHIN a project,
+// so resolving it to the right row would need a project_id. The point-code list already
+// carries the real audit_infrastructure.id directly (confirmed format: {id, point_code, code}),
+// so we read that straight off instead of ever resolving s_code -> id ourselves.
+const AUDIT_INFRA_ID_KEYS = ['id','Id','ID','audit_infra_id','Audit_Infra_Id'];
+
+function extractPcIdentity(props, fallbackIndex){
+  const sCode = extractPropByKeys(props, S_CODE_KEYS);
+  const pointCode = extractPropByKeys(props, POINT_CODE_ONLY_KEYS);
+  const auditInfraIdRaw = extractPropByKeys(props, AUDIT_INFRA_ID_KEYS);
+  const auditInfraId = auditInfraIdRaw !== undefined ? Number(auditInfraIdRaw) : undefined;
+  if(sCode !== undefined && pointCode !== undefined){
+    return {code: `${sCode}-${pointCode}`, sCode, pointCode, auditInfraId};
+  }
+  const code = extractPcCode(props, fallbackIndex);
+  return {code, sCode: sCode || '', pointCode: pointCode !== undefined ? pointCode : code, auditInfraId};
+}
+
+document.getElementById('pcListInput').addEventListener('change', e=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const isKML = /\.kml$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    try{
+      const gj = isKML ? kmlToGeoJSON(ev.target.result) : JSON.parse(ev.target.result);
+      const points = gj.features.filter(f=>f.geometry && f.geometry.type==='Point');
+      if(points.length===0) throw new Error('No Point features found in this file.');
+      pointCodeList = points.map((f,i)=>{
+        const identity = extractPcIdentity(f.properties, i);
+        return {
+          code: identity.code, sCode: identity.sCode, pointCode: identity.pointCode, auditInfraId: identity.auditInfraId,
+          latlng: L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]),
+          status: pcRegistry[identity.code] ? 'done' : 'pending',
+          properties: f.properties || {}
+        };
+      });
+      const missingId = pointCodeList.filter(p=>p.auditInfraId===undefined || Number.isNaN(p.auditInfraId));
+      if(missingId.length>0){
+        alert(`Warning: ${missingId.length} of ${pointCodeList.length} point(s) in this file have no numeric "id" property -- those can't be saved to the database (audit_infra_id is required). Check the file has an "id" field on every point.`);
+      }
+      // heal any already-placed point codes that predate the sCode/pointCode/auditInfraId
+      // persistence fix -- they'd otherwise keep sending blank/missing values forever.
+      let healed = 0;
+      pointCodeList.forEach(entry=>{
+        const pc = pcRegistry[entry.code];
+        if(pc && !pc.sCode && !pc.pointCode && !pc.auditInfraId && (entry.sCode || entry.pointCode !== entry.code || entry.auditInfraId !== undefined)){
+          pc.sCode = entry.sCode; pc.pointCode = entry.pointCode; pc.auditInfraId = entry.auditInfraId; healed++;
+          refreshPcTooltip(entry.code);
+        }
+      });
+      if(healed>0) console.log(`Backfilled sCode/pointCode/auditInfraId for ${healed} previously-placed point code(s).`);
+      renderPcList();
+      document.getElementById('pcListContainer').style.display = 'block';
+      if(pointCodeList.length){
+        const bounds = L.latLngBounds(pointCodeList.map(p=>p.latlng));
+        map.fitBounds(bounds, {maxZoom:18});
+      }
+    }catch(err){ alert('Could not parse point code file: '+err.message); }
+  };
+  reader.readAsText(file);
+});
+
+function updateSearchDatalist(){
+  const dl = document.getElementById('pcCodeOptions');
+  const codes = new Set([...Object.keys(pcRegistry), ...pointCodeList.map(p=>p.code)]);
+  dl.innerHTML = [...codes].sort().map(c=>`<option value="${c.replace(/"/g,'&quot;')}">`).join('');
+}
+
+function flashPc(code){
+  const pc = pcRegistry[code];
+  if(!pc) return;
+  let n = 0;
+  const iv = setInterval(()=>{
+    pc.visualLayer.eachLayer(l=>{ if(l.setStyle) l.setStyle({opacity: n%2===0 ? 0.15 : 0.95}); });
+    n++;
+    if(n>5){ clearInterval(iv); redrawPc(code); }
+  }, 180);
+}
+
+function searchGo(){
+  const raw = document.getElementById('searchInput').value.trim();
+  if(!raw) return;
+  const lower = raw.toLowerCase();
+
+  // exact match in generated point codes first
+  let code = Object.keys(pcRegistry).find(c=>c.toLowerCase()===lower);
+  if(!code) code = Object.keys(pcRegistry).find(c=>c.toLowerCase().includes(lower));
+  if(code){
+    if(!pcRegistry[code].sCode && !pcRegistry[code].pointCode && !pcRegistry[code].auditInfraId){
+      const listEntry = pointCodeList.find(p=>p.code===code);
+      if(listEntry){ pcRegistry[code].sCode = listEntry.sCode; pcRegistry[code].pointCode = listEntry.pointCode; pcRegistry[code].auditInfraId = listEntry.auditInfraId; refreshPcTooltip(code); }
+    }
+    map.setView(pcRegistry[code].center, Math.max(map.getZoom(), 20));
+    flashPc(code);
+    return;
+  }
+
+  // fall back to the uploaded point-code list (not yet generated)
+  let entry = pointCodeList.find(p=>p.code.toLowerCase()===lower);
+  if(!entry) entry = pointCodeList.find(p=>p.code.toLowerCase().includes(lower));
+  if(entry){
+    map.setView(entry.latlng, Math.max(map.getZoom(), 19));
+    alert(`"${entry.code}" is in your point code list but hasn't been generated yet. Click it in the list, or click "Generate" here, to create its scale.`);
+    return;
+  }
+
+  alert(`No point code matching "${raw}" found (checked both generated point codes and the uploaded list).`);
+}
+
+// the tool ID ("S-035-1") stays the map/list key, but the real database id (audit_infra_id)
+// is shown alongside it everywhere that ID is displayed, for clarity on which DB row it is.
+function pcDisplayLabel(code){
+  const pc = pcRegistry[code];
+  const auditInfraId = pc ? pc.auditInfraId : (pointCodeList.find(p=>p.code===code)||{}).auditInfraId;
+  return auditInfraId !== undefined ? `${code} [ID ${auditInfraId}]` : code;
+}
+
+// the move-handle's map label is set once at marker-creation time, so anywhere auditInfraId
+// gets backfilled onto an already-placed point code needs this to keep that label in sync.
+function refreshPcTooltip(code){
+  const pc = pcRegistry[code];
+  if(pc && pc.moveHandle) pc.moveHandle.setTooltipContent(pcDisplayLabel(code));
+}
+
+function renderPcList(){
+  const container = document.getElementById('pcList');
+  container.innerHTML = '';
+  updateSearchDatalist();
+  pointCodeList.forEach((entry, idx)=>{
+    const pc = pcRegistry[entry.code];
+    const hasData = !!(pc && pc.locked); // green only once actually saved, not merely placed
+    const div = document.createElement('div');
+    div.className = 'pc-list-item' + (hasData ? ' done' : '');
+    div.innerHTML = `<span class="dot" style="background:${hasData ? '#5fbf8a' : '#e0453a'};"></span>`+
+      `<span class="code">${pcDisplayLabel(entry.code)}</span>`+
+      `<span style="font-size:10px;color:var(--ink-dim);">${hasData ? '✓ saved' : (pc ? '✎ editing' : '→ place')}</span>`;
+    div.onclick = ()=>generateFromList(idx);
+    container.appendChild(div);
+  });
+  const done = pointCodeList.filter(p=>pcRegistry[p.code] && pcRegistry[p.code].locked).length;
+  document.getElementById('pcListStatus').textContent = `${done}/${pointCodeList.length}`;
+}
+
+function generateFromList(idx){
+  const entry = pointCodeList[idx];
+
+  if(pcRegistry[entry.code]){
+    // already placed -- just bring it into view and select it for the Save bar, don't regenerate
+    // backfill sCode/pointCode/auditInfraId if this point code predates that fix (was created
+    // before these were persisted) -- otherwise it would silently keep sending blank values forever.
+    if(!pcRegistry[entry.code].sCode && !pcRegistry[entry.code].pointCode && !pcRegistry[entry.code].auditInfraId){
+      pcRegistry[entry.code].sCode = entry.sCode;
+      pcRegistry[entry.code].pointCode = entry.pointCode;
+      pcRegistry[entry.code].auditInfraId = entry.auditInfraId;
+      refreshPcTooltip(entry.code);
+    }
+    map.setView(pcRegistry[entry.code].center, Math.max(map.getZoom(), 19));
+    setSelectedPointCode(entry.code);
+    return;
+  }
+
+  if(!roadLayer){
+    alert('Upload a road network first (GeoJSON or KML) — the guide needs a road line to orient perpendicular to.');
+    return;
+  }
+
+  map.setView(entry.latlng, Math.max(map.getZoom(), 19));
+  const result = createPointCodeAt(entry.code, entry.latlng);
+  if(!result.ok){
+    const msg = result.distance === null
+      ? `"${entry.code}": no road features found in the loaded network at all.`
+      : `"${entry.code}": nearest road is ${result.distance.toFixed(0)}m away, beyond the ${ROAD_SNAP_THRESHOLD_M}m snap limit. You can still place it manually on the map instead.`;
+    alert(msg);
+    return;
+  }
+  entry.status = 'done';
+  pcRegistry[entry.code].sCode = entry.sCode;
+  pcRegistry[entry.code].pointCode = entry.pointCode;
+  pcRegistry[entry.code].auditInfraId = entry.auditInfraId;
+  refreshPcTooltip(entry.code);
+  renderPcList();
+  disarmAddMode();
+  setSelectedPointCode(entry.code);
+  document.getElementById('pcHint').textContent = `"${entry.code}" placed from the point code list, snapped perpendicular to the nearest road. Drag any tick to fine-tune.`;
+}
+
+
+const records = [];
+
+function makePcIcon(color, angleDeg, width){
+  width = width || 4;
+  const half = width/2;
+  return L.divIcon({
+    className:'',
+    html:`<div style="position:relative;width:26px;height:26px;">
+      <div class="pc-tick-hit"></div>
+      <div class="pc-tick-bar" style="background:${color};width:${width}px;margin-left:-${half}px;transform:rotate(${angleDeg}deg);"></div>
+    </div>`,
+    iconSize:[26,26], iconAnchor:[13,13]
+  });
+}
+
+// angle (CSS degrees) to rotate a vertical bar so it ends up perpendicular to the A->B axis,
+// matching how the axis actually looks on screen (equirect meters are locally angle-accurate
+// here since Web Mercator is conformal at this scale).
+function axisAngleDeg(posA, posB){
+  const originLat = posA.lat;
+  const a = llToXY(posA, originLat), b = llToXY(posB, originLat);
+  const meterAngle = Math.atan2(b.y-a.y, b.x-a.x);
+  return -meterAngle * 180/Math.PI;
+}
+
+function updateTickAngles(code){
+  const pc = pcRegistry[code];
+  const angle = axisAngleDeg(pc.positions[0], pc.positions[pc.positions.length-1]);
+  pc.markers.forEach(m=>{
+    const el = m.getElement();
+    if(!el) return;
+    const bar = el.querySelector('.pc-tick-bar');
+    if(bar) bar.style.transform = `rotate(${angle}deg)`;
+  });
+}
+
+function drawHaloLine(points, group, weight){
+  L.polyline(points, {color:'#000', weight: weight+2.5, opacity:0.4}).addTo(group);
+  L.polyline(points, {color:'#fff', weight: weight, opacity:0.95}).addTo(group);
+}
+function midpoint(a,b){ return L.latLng((a.lat+b.lat)/2, (a.lng+b.lng)/2); }
+
+// redraws only the halo lines/ticks/labels -- never touches pc.markerLayer, so an in-progress
+// drag on one of the 4 markers is never interrupted by a redraw triggered by that same drag.
+function redrawPc(code){
+  const pc = pcRegistry[code];
+  pc.visualLayer.clearLayers();
+  const positions = pc.positions;
+  const n = positions.length;
+  const pA = positions[0], pFA = positions[1], pFB = positions[n-2], pB = positions[n-1];
+  drawHaloLine(positions, pc.visualLayer, 2.2);
+  L.polyline(positions, {opacity:0, weight:16}).addTo(pc.visualLayer).on('click', ()=>setSelectedPointCode(code)); // generous invisible click target
+
+  const fA = pA.distanceTo(pFA), fB = pFB.distanceTo(pB), row = pA.distanceTo(pB);
+  const labels = [[midpoint(pA,pFA), `Ft A · ${fA.toFixed(1)}m`]];
+  let result;
+  if(pc.median && n===6){
+    const pMA = positions[2], pMB = positions[3];
+    const rwA = pFA.distanceTo(pMA), mw = pMA.distanceTo(pMB), rwB = pMB.distanceTo(pFB);
+    labels.push([midpoint(pFA,pMA), `Road A · ${rwA.toFixed(1)}m`]);
+    labels.push([midpoint(pMA,pMB), `Median · ${mw.toFixed(1)}m`]);
+    labels.push([midpoint(pMB,pFB), `Road B · ${rwB.toFixed(1)}m`]);
+    // carriageway_m kept as the sum for anything (older exports, CSV) still reading that field.
+    result = {footpathA_m:fA, footpathB_m:fB, row_total_m:row, median:true,
+      roadWidthSideA_m:rwA, medianWidth_m:mw, roadWidthSideB_m:rwB, carriageway_m:rwA+mw+rwB};
+  } else {
+    const cw = pFA.distanceTo(pFB);
+    labels.push([midpoint(pFA,pFB), `Carriageway · ${cw.toFixed(1)}m`]);
+    result = {footpathA_m:fA, footpathB_m:fB, row_total_m:row, median:false, carriageway_m:cw,
+      roadWidthSideA_m:undefined, medianWidth_m:undefined, roadWidthSideB_m:undefined};
+  }
+  labels.push([midpoint(pFB,pB), `Ft B · ${fB.toFixed(1)}m`]);
+  labels.forEach(([pos,text])=>{
+    L.circleMarker(pos, {radius:0, opacity:0, fillOpacity:0}).addTo(pc.visualLayer)
+      .bindTooltip(text, {permanent:true, direction:'top', offset:[0,-4], className:'dim-label'});
+  });
+
+  return result;
+}
+
+function sanitizeKey(code){ return code.replace(/[\s\/\\'"]/g, '_').slice(0,150); }
+
+async function savePc(code){
+  const pc = pcRegistry[code];
+  const m = redrawPc(code);
+  const rec = {pointCode: code, roadName: pc.roadName || '', ...m, medianHeight_m: pc.medianHeight_m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
+    nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
+    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null, auditInfraId: pc.auditInfraId,
+    savedAt: new Date().toISOString(), locked: !!pc.locked};
+  const existing = records.findIndex(r=>r.pointCode===code);
+  if(existing>-1) records[existing]=rec; else records.push(rec);
+  renderLog();
+  try{
+    await window.storage.set('xsec:'+sanitizeKey(code), JSON.stringify(rec), false);
+    await refreshSavedCount();
+  }catch(err){ console.error('save failed', code, err); }
+}
+
+// live visual + list-number update while dragging -- does NOT write to storage. Nothing is
+// actually persisted until the explicit Save/Lock action is clicked (savePc above).
+function refreshRecordDisplay(code){
+  const pc = pcRegistry[code];
+  const m = redrawPc(code);
+  const rec = {pointCode: code, roadName: pc.roadName || '', ...m, medianHeight_m: pc.medianHeight_m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
+    nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
+    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null, auditInfraId: pc.auditInfraId,
+    savedAt: (records.find(r=>r.pointCode===code)||{}).savedAt, locked: !!pc.locked};
+  const existing = records.findIndex(r=>r.pointCode===code);
+  if(existing>-1) records[existing]=rec; else records.push(rec);
+  renderLog();
+}
+
+// axis-based position model: pc.center + pc.dir (unit vector) + pc.offsets (signed meters
+// along dir) define all 4 tick positions. Only the rotate handle changes pc.dir; dragging any
+// of the 4 ticks only changes its own offset, sliding along the current line -- never off it.
+function syncPositionsFromAxis(pc){
+  const originLat = pc.center.lat;
+  const c = llToXY(pc.center, originLat);
+  pc.positions = pc.offsets.map(o => xyToLL(c.x + pc.dir.x*o, c.y + pc.dir.y*o, originLat));
+}
+
+// reconstructs the axis model from 4 saved lat/lngs (used when loading older/saved data) --
+// also has the side effect of auto-straightening anything saved before axis-locking existed.
+function reconstructAxisFromPositions(positions){
+  const pA = positions[0], pB = positions[positions.length-1];
+  const center = midpoint(pA, pB);
+  const originLat = center.lat;
+  const c = llToXY(center, originLat);
+  const a = llToXY(pA, originLat), b = llToXY(pB, originLat);
+  const dx = b.x-a.x, dy = b.y-a.y, len = Math.hypot(dx,dy) || 1;
+  const dir = {x: dx/len, y: dy/len};
+  const offsets = positions.map(p=>{
+    const pxy = llToXY(p, originLat);
+    return (pxy.x-c.x)*dir.x + (pxy.y-c.y)*dir.y;
+  });
+  return {center, dir, offsets};
+}
+
+function makeRotateIcon(){
+  return L.divIcon({
+    className:'',
+    html:`<div class="pc-rotate-hit">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0a0e0b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-3.5-7.1"/><polyline points="21 3 21 9 15 9"/>
+      </svg>
+    </div>`,
+    iconSize:[26,26], iconAnchor:[13,13]
+  });
+}
+
+const ROTATE_EXT_M = 4; // how far past the end of the line the rotate handle sits
+
+function tangentOf(pc){ return {x:-pc.dir.y, y:pc.dir.x}; } // perpendicular to dir = along the road
+
+function rotateHandlePos(pc){
+  const originLat = pc.center.lat;
+  const c = llToXY(pc.center, originLat);
+  const maxOffset = Math.max(...pc.offsets);
+  const extended = maxOffset + ROTATE_EXT_M;
+  return xyToLL(c.x + pc.dir.x*extended, c.y + pc.dir.y*extended, originLat);
+}
+
+function createRotateHandle(code){
+  const pc = pcRegistry[code];
+  const handle = L.marker(rotateHandlePos(pc), {icon: makeRotateIcon(), draggable:true, bubblingMouseEvents:false})
+    .addTo(pc.markerLayer)
+    .bindTooltip('Drag to rotate the scale', {direction:'top', offset:[0,-10]});
+  handle.on('click', ()=>setSelectedPointCode(code));
+
+  // the handle sits ON the axis extension now, so its direction from center IS the new axis
+  // direction directly -- no perpendicular conversion needed.
+  function applyRotation(mouseLatLng){
+    const originLat = pc.center.lat;
+    const c = llToXY(pc.center, originLat);
+    const m = llToXY(mouseLatLng, originLat);
+    const vx = m.x-c.x, vy = m.y-c.y;
+    const len = Math.hypot(vx,vy);
+    if(len < 0.05) return; // ignore near-zero drags (avoid divide-by-zero jitter)
+    pc.dir = {x: vx/len, y: vy/len};
+    syncPositionsFromAxis(pc);
+    handle.setLatLng(rotateHandlePos(pc));
+    pc.markers.forEach((mk,i)=>mk.setLatLng(pc.positions[i]));
+    refreshRecordDisplay(code); updateTickAngles(code);
+  }
+  handle.on('drag', e=>applyRotation(e.target.getLatLng()));
+  handle.on('dragend', e=>applyRotation(e.target.getLatLng()));
+  pc.rotateHandle = handle;
+}
+
+const MAX_MOVE_FROM_NOMINAL_M = 50;
+
+// draggable point-code dot itself: lets you slide the whole cross-section a short distance
+// along the road (e.g. to dodge tree canopy at the exact nominal spot), re-snapping
+// perpendicular to whichever road segment is nearest each time. Clamped to 50m from the
+// original ("nominal") location -- the offset distance gets recorded for the record.
+function createMoveHandle(code){
+  const pc = pcRegistry[code];
+  const handle = L.marker(pc.center, {
+    icon: L.divIcon({className:'', html:'<div class="pc-move-hit"></div>', iconSize:[16,16], iconAnchor:[8,8]}),
+    draggable:true, bubblingMouseEvents:false
+  })
+    .addTo(pc.markerLayer)
+    .bindTooltip(pcDisplayLabel(code), {permanent:true, direction:'bottom', offset:[0,10], className:'pc-label'});
+  handle.on('click', ()=>setSelectedPointCode(code));
+
+  function applyMove(mouseLatLng){
+    const snap = findNearestRoadPoint(mouseLatLng);
+    if(!snap) return; // no road nearby at all -- ignore, keep last valid position
+    const candidateCenter = snap.point;
+    const distFromNominal = pc.nominalCenter.distanceTo(candidateCenter);
+    if(distFromNominal > MAX_MOVE_FROM_NOMINAL_M){
+      handle.setLatLng(pc.center); // refuse the move, snap the handle back visually
+      return;
+    }
+    pc.center = candidateCenter;
+    pc.dir = {x:-snap.tangent.ty, y:snap.tangent.tx};
+    pc.offsetFromNominal_m = distFromNominal;
+    syncPositionsFromAxis(pc);
+    handle.setLatLng(pc.center);
+    pc.markers.forEach((mk,i)=>mk.setLatLng(pc.positions[i]));
+    if(pc.rotateHandle) pc.rotateHandle.setLatLng(rotateHandlePos(pc));
+    refreshRecordDisplay(code); updateTickAngles(code);
+  }
+  handle.on('drag', e=>applyMove(e.target.getLatLng()));
+  handle.on('dragend', e=>applyMove(e.target.getLatLng()));
+  pc.moveHandle = handle;
+}
+
+function makeActionIcon(locked){
+  return L.divIcon({
+    className:'',
+    html:`<div class="pc-action-hit">${locked ? '✏️' : '💾'}</div>`,
+    iconSize:[26,26], iconAnchor:[13,13]
+  });
+}
+
+function actionIconPos(pc){
+  const originLat = pc.center.lat;
+  const c = llToXY(pc.center, originLat);
+  const t = tangentOf(pc);
+  return xyToLL(c.x + t.x*5, c.y + t.y*5, originLat);
+}
+
+function createActionIcon(code){
+  const pc = pcRegistry[code];
+  const icon = L.marker(actionIconPos(pc), {icon: makeActionIcon(pc.locked), draggable:false, bubblingMouseEvents:false})
+    .addTo(pc.actionLayer)
+    .bindTooltip(pc.locked ? 'Click to edit' : 'Click to save & lock', {direction:'top', offset:[0,-10]});
+  icon.on('click', ()=>toggleLock(code));
+  pc.actionIcon = icon;
+}
+
+function updateActionIcon(code){
+  const pc = pcRegistry[code];
+  if(!pc.actionIcon) return;
+  pc.actionIcon.setIcon(makeActionIcon(pc.locked));
+  pc.actionIcon.setTooltipContent(pc.locked ? 'Click to edit' : 'Click to save & lock');
+}
+
+// the one deliberate "commit" action: locking persists the current adjustment and hides the
+// drag handles so nothing gets bumped by accident; editing un-hides them for further adjustment.
+function setMarkersInteractive(pc, enabled){
+  pc.markers.forEach(m=>{ if(enabled) m.dragging.enable(); else m.dragging.disable(); });
+  if(pc.rotateHandle){ if(enabled) pc.rotateHandle.dragging.enable(); else pc.rotateHandle.dragging.disable(); }
+  if(pc.moveHandle){ if(enabled) pc.moveHandle.dragging.enable(); else pc.moveHandle.dragging.disable(); }
+}
+
+async function toggleLock(code){
+  const pc = pcRegistry[code];
+  if(pc.locked){
+    pc.locked = false;
+    setMarkersInteractive(pc, true);
+    updateActionIcon(code);
+    renderLog();
+    refreshCurrentPcBar();
+    renderPcList();
+  } else {
+    pc.locked = true;
+    setMarkersInteractive(pc, false); // markers stay visible on the map -- just no longer draggable
+    savePc(code);
+    updateActionIcon(code);
+    renderLog();
+    refreshCurrentPcBar();
+    renderPcList();
+    armAddMode(); // re-arm right away -- don't make the person wait for the sync/capture below
+
+    const statusEl = document.getElementById('captureAllStatus');
+    const btn = document.getElementById('savebtn-'+sanitizeKey(code));
+    if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+    if(statusEl) statusEl.textContent = `Syncing "${code}" to the sheet and capturing its drone image…`;
+
+    // DB save temporarily disabled -- back on the Google Sheet for now, DB work resumes later.
+    // await saveToDatabase(code); // road_profile + footpath_profile rows in Postgres
+    await saveEverythingToSheet(code); // one combined request: sheet row + both images, atomically
+
+    if(statusEl) statusEl.textContent = `"${code}" saved: row synced, image captured and uploaded.`;
+    renderLog(); // resets the button out of its "Saving…" state, and shows the "✓ images saved" tag
+    refreshCurrentPcBar();
+  }
+}
+
+// removes just the tick markers (not the rotate/move handles, which share the same layer)
+// so a median toggle can rebuild the right number of ticks without disturbing them.
+function rebuildPcMarkers(code){
+  const pc = pcRegistry[code];
+  (pc.markers || []).forEach(m => pc.markerLayer.removeLayer(m));
+  createPcMarkers(code);
+  setMarkersInteractive(pc, !pc.locked);
+}
+
+function createPcMarkers(code){
+  const pc = pcRegistry[code];
+  const n = pc.positions.length;
+  const angle = axisAngleDeg(pc.positions[0], pc.positions[n-1]);
+  pc.markers = pc.positions.map((pos,i)=>{
+    const tickWidth = (i===0 || i===n-1) ? 4 : 2; // building edges are twice as wide as the rest -- kept thin so they don't obscure the drone photo underneath; the invisible .pc-tick-hit circle around each one is still 22px, so they stay just as easy to grab
+    const marker = L.marker(pos, {icon: makePcIcon(pcColorFor(i,n), angle, tickWidth), draggable:true, bubblingMouseEvents:false})
+      .addTo(pc.markerLayer)
+      .bindTooltip(pcLabelFor(i,n), {direction:'top', offset:[0,-8]});
+    marker.on('click', ()=>setSelectedPointCode(code));
+
+    // every tick only slides its own offset along the fixed axis, clamped against its immediate
+    // neighbor(s) so the left-to-right order of ticks can never cross -- none of them can rotate
+    // or bend the line. Rotation is the handle's job.
+    const MIN_GAP_M = 0.1; // keeps segments from collapsing to exactly zero
+    function applyOffset(mouseLatLng){
+      const originLat = pc.center.lat;
+      const c = llToXY(pc.center, originLat);
+      const m = llToXY(mouseLatLng, originLat);
+      let offset = (m.x-c.x)*pc.dir.x + (m.y-c.y)*pc.dir.y;
+
+      // each tick is clamped against its immediate neighbor(s) so ticks can never cross each
+      // other -- order along the line must always stay A, Ft-A, [Med-A, Med-B,] Ft-B, B.
+      const last = pc.offsets.length-1;
+      if(i===0) offset = Math.min(offset, pc.offsets[1]-MIN_GAP_M);
+      else if(i===last) offset = Math.max(offset, pc.offsets[last-1]+MIN_GAP_M);
+      else offset = Math.max(pc.offsets[i-1]+MIN_GAP_M, Math.min(offset, pc.offsets[i+1]-MIN_GAP_M));
+
+      pc.offsets[i] = offset;
+      syncPositionsFromAxis(pc);
+      marker.setLatLng(pc.positions[i]);
+      refreshRecordDisplay(code);
+    }
+    marker.on('drag', e=>applyOffset(e.target.getLatLng()));
+    marker.on('dragend', e=>applyOffset(e.target.getLatLng()));
+    return marker;
+  });
+}
+
+// switches a point code between 4 markers (single road_width) and 6 markers (median present:
+// road_width_side_a, median_width, road_width_side_b). Inserting/removing the 2 median-edge
+// offsets keeps the existing building/footpath edges exactly where they were.
+function setMedianMode(code, enabled){
+  const pc = pcRegistry[code];
+  enabled = !!enabled;
+  if(!!pc.median === enabled) return;
+  const offsets = pc.offsets;
+  if(enabled){
+    const fA = offsets[1], fB = offsets[offsets.length-2];
+    const third = (fB - fA)/3;
+    pc.offsets = [offsets[0], offsets[1], fA+third, fB-third, offsets[offsets.length-2], offsets[offsets.length-1]];
+  } else {
+    pc.offsets = [offsets[0], offsets[1], offsets[offsets.length-2], offsets[offsets.length-1]];
+    pc.medianHeight_m = undefined;
+  }
+  pc.median = enabled;
+  syncPositionsFromAxis(pc);
+  rebuildPcMarkers(code);
+  if(pc.rotateHandle) pc.rotateHandle.setLatLng(rotateHandlePos(pc));
+  refreshRecordDisplay(code);
+  updateTickAngles(code);
+}
+
+const ROAD_SNAP_THRESHOLD_M = 200; // how far a click/point can be from a loaded road and still snap
+
+// core creation logic, shared by manual map-click entry and by the point-code list.
+// returns {ok, distance} -- distance is the nearest road found even on failure, for diagnostics.
+function createPointCodeAt(code, clickLatLng){
+  const nearest = findNearestRoadPoint(clickLatLng);
+  if(!nearest) return {ok:false, distance:null};
+  if(nearest.dist > ROAD_SNAP_THRESHOLD_M) return {ok:false, distance:nearest.dist};
+  const snap = nearest;
+
+  const totalLen = parseFloat(document.getElementById('guideLen').value) || 30;
+  const halfLen = totalLen/2;
+  const footpathGuess = Math.min(1.8, halfLen*0.3);
+
+  const center = snap.point;
+  const dir = {x:-snap.tangent.ty, y:snap.tangent.tx}; // perpendicular to the snapped road's tangent, always
+  const offsets = [-halfLen, -(halfLen-footpathGuess), (halfLen-footpathGuess), halfLen];
+
+  if(pcRegistry[code]) map.removeLayer(pcRegistry[code].group);
+
+  const group = L.layerGroup().addTo(map);
+  const visualLayer = L.layerGroup().addTo(group);
+  const markerLayer = L.layerGroup().addTo(group);
+  const actionLayer = L.layerGroup().addTo(group);
+  pcRegistry[code] = {center, dir, offsets, nominalCenter:center, offsetFromNominal_m:0, group, visualLayer, markerLayer, actionLayer, locked:false, roadName: snap.props ? (snap.props.Road_CentrelineName||snap.props.name||'') : ''};
+  syncPositionsFromAxis(pcRegistry[code]);
+  createPcMarkers(code);
+  createRotateHandle(code);
+  createMoveHandle(code);
+  createActionIcon(code);
+  savePc(code);
+  return {ok:true, distance:nearest.dist};
+}
+
+function addPointCode(clickLatLng){
+  if(!roadLayer){
+    alert('Upload a road network first (GeoJSON or KML) — the guide needs a road line to orient perpendicular to.');
+    return;
+  }
+
+  // if a point-code list is loaded, clicking near a pending code uses it automatically
+  const NEARBY_M = 20;
+  let matched = null;
+  for(const entry of pointCodeList){
+    if(entry.status !== 'pending') continue;
+    if(clickLatLng.distanceTo(entry.latlng) <= NEARBY_M){ matched = entry; break; }
+  }
+
+  let code;
+  let targetLatLng = clickLatLng;
+  if(matched){
+    code = matched.code;
+    targetLatLng = matched.latlng; // use the file's coordinate, not the imprecise click
+  } else {
+    code = prompt('Point code for this location:', '');
+    if(code === null) return;
+    code = code.trim() || ('PC-' + Date.now().toString(36).toUpperCase());
+    if(pcRegistry[code] && !confirm(`"${code}" already exists on this map. Overwrite it at this new location?`)) return;
+  }
+
+  const result = createPointCodeAt(code, targetLatLng);
+  if(!result.ok){
+    const msg = result.distance === null
+      ? 'No road features found in the loaded network at all — check the file actually contains road geometry.'
+      : `The nearest road is ${result.distance.toFixed(0)}m away, beyond the ${ROAD_SNAP_THRESHOLD_M}m snap limit. Click closer to a road line from your loaded network, or check that network covers this area.`;
+    alert(msg);
+    return;
+  }
+  if(matched){
+    matched.status = 'done';
+    pcRegistry[code].sCode = matched.sCode;
+    pcRegistry[code].pointCode = matched.pointCode;
+    pcRegistry[code].auditInfraId = matched.auditInfraId;
+    refreshPcTooltip(code);
+    renderPcList();
+  }
+  disarmAddMode();
+  setSelectedPointCode(code);
+
+  document.getElementById('pcHint').textContent = `"${code}" placed, snapped perpendicular to the nearest road${pcRegistry[code].roadName ? ' ('+pcRegistry[code].roadName+')' : ''}. Drag any tick to fine-tune.`;
+}
+
+let selectedPointCode = null;
+
+function setSelectedPointCode(code){
+  selectedPointCode = code;
+  refreshCurrentPcBar();
+}
+
+function setMedianHeight(code, value){
+  const pc = pcRegistry[code];
+  if(!pc) return;
+  pc.medianHeight_m = value === '' ? undefined : Number(value);
+  refreshRecordDisplay(code);
+}
+
+function refreshCurrentPcBar(){
+  const bar = document.getElementById('currentPcBar');
+  if(!selectedPointCode || !pcRegistry[selectedPointCode]){ bar.style.display = 'none'; return; }
+  const pc = pcRegistry[selectedPointCode];
+  bar.style.display = 'block';
+  document.getElementById('currentPcLabel').textContent = pcDisplayLabel(selectedPointCode) + (pc.locked ? ' (locked)' : ' (editing)');
+  document.getElementById('currentPcSaveBtn').textContent = pc.locked ? '✏️ Edit' : '💾 Save (photo + sheet)';
+  document.getElementById('currentPcMedianToggle').checked = !!pc.median;
+  document.getElementById('currentPcMedianToggle').disabled = !!pc.locked;
+  document.getElementById('currentPcMedianHeightRow').style.display = pc.median ? 'flex' : 'none';
+  document.getElementById('currentPcMedianHeight').value = pc.medianHeight_m !== undefined ? pc.medianHeight_m : '';
+  document.getElementById('currentPcMedianHeight').disabled = !!pc.locked;
+}
+
+document.addEventListener('keydown', e=>{
+  if(e.key !== 'Enter') return;
+  const tag = document.activeElement ? document.activeElement.tagName : '';
+  if(tag==='INPUT' || tag==='TEXTAREA') return; // don't hijack Enter while typing in a field
+  if(!selectedPointCode || !pcRegistry[selectedPointCode]) return;
+  e.preventDefault();
+  toggleLock(selectedPointCode);
+});
+
+let addMode = false;
+function toggleMode(){
+  addMode = !addMode;
+  document.getElementById('mode-pc').classList.toggle('active', addMode);
+  document.getElementById('mode-pc').textContent = addMode ? 'Click the map to place…' : 'Add point code';
+}
+function disarmAddMode(){
+  if(!addMode) return;
+  addMode = false;
+  document.getElementById('mode-pc').classList.remove('active');
+  document.getElementById('mode-pc').textContent = 'Add point code';
+}
+function armAddMode(){
+  addMode = true;
+  document.getElementById('mode-pc').classList.add('active');
+  document.getElementById('mode-pc').textContent = 'Click the map to place…';
+}
+map.on('click', e=>{
+  if(!addMode) return;
+  addPointCode(e.latlng);
+});
+
+function typeLabelRow(r){
+  const img = imageMeta[r.pointCode];
+  const skey = sanitizeKey(r.pointCode);
+  const pc = pcRegistry[r.pointCode];
+  const locked = pc ? pc.locked : r.locked;
+  return `<span class="del" onclick="deleteRecord('${r.pointCode}')">✕</span>`+
+    `<span class="k">${pcDisplayLabel(r.pointCode)}</span>${r.roadName ? ' — '+r.roadName : ''} `+
+    `<span style="font-size:10px;color:${locked?'var(--ink-dim)':'var(--accent2)'};">${locked?'🔒 locked':'✎ editing'}</span><br>`+
+    `Footpath A: <span class="w">${r.footpathA_m.toFixed(2)} m</span><br>`+
+    (r.median
+      ? `Road A: <span class="w">${r.roadWidthSideA_m.toFixed(2)} m</span> · `+
+        `Median: <span class="w">${r.medianWidth_m.toFixed(2)} m</span>${r.medianHeight_m!==undefined ? ` (h ${r.medianHeight_m}m)` : ''} · `+
+        `Road B: <span class="w">${r.roadWidthSideB_m.toFixed(2)} m</span><br>`
+      : `Carriageway: <span class="w">${r.carriageway_m.toFixed(2)} m</span><br>`)+
+    `Footpath B: <span class="w">${r.footpathB_m.toFixed(2)} m</span><br>`+
+    `Total ROW: <span class="w">${r.row_total_m.toFixed(2)} m</span><br>`+
+    ((r.offsetFromNominal_m||0) > 0.5 ? `<span style="color:var(--accent2);">↕ moved ${r.offsetFromNominal_m.toFixed(1)}m from nominal</span><br>` : '')+
+    `<button id="savebtn-${skey}" style="margin-top:6px;width:auto;padding:5px 9px;font-size:10.5px;" onclick="toggleLock('${r.pointCode}')">${locked ? '✏️ Edit' : '💾 Save (photo + sheet)'}</button>`+
+    (img ? ` <span style="font-size:10px;color:var(--accent);">✓ images saved</span>` : '');
+}
+
+function renderLog(){
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+  updateSearchDatalist();
+  records.slice().reverse().forEach(r=>{
+    const div = document.createElement('div');
+    div.className = 'entry';
+    div.innerHTML = typeLabelRow(r);
+    log.appendChild(div);
+  });
+}
+
+async function deleteRecord(code){
+  if(!confirm(`Delete point code "${code}"?`)) return;
+  const idx = records.findIndex(r=>r.pointCode===code);
+  if(idx>-1) records.splice(idx,1);
+  if(pcRegistry[code]){ map.removeLayer(pcRegistry[code].group); delete pcRegistry[code]; }
+  delete imageMeta[code];
+  if(selectedPointCode===code){ selectedPointCode=null; refreshCurrentPcBar(); }
+  try{ await window.storage.delete('xsec:'+sanitizeKey(code), false); }catch(err){}
+  try{ await window.storage.delete('imgmeta:'+sanitizeKey(code), false); }catch(err){}
+  renderLog();
+  await refreshSavedCount();
+}
+
+async function refreshSavedCount(){
+  try{
+    const listing = await window.storage.list('xsec:', false);
+    document.getElementById('savedCount').textContent = listing && listing.keys ? listing.keys.length : 0;
+  }catch(err){}
+}
+
+async function clearAllSaved(){
+  if(!confirm('Delete ALL saved point codes and captured image records? This cannot be undone.')) return;
+  try{
+    const listing = await window.storage.list('xsec:', false);
+    if(listing && listing.keys){ for(const key of listing.keys){ await window.storage.delete(key, false); } }
+  }catch(err){}
+  try{
+    const listing2 = await window.storage.list('imgmeta:', false);
+    if(listing2 && listing2.keys){ for(const key of listing2.keys){ await window.storage.delete(key, false); } }
+  }catch(err){}
+  Object.keys(pcRegistry).forEach(code=>map.removeLayer(pcRegistry[code].group));
+  Object.keys(pcRegistry).forEach(code=>delete pcRegistry[code]);
+  Object.keys(imageMeta).forEach(code=>delete imageMeta[code]);
+  records.length = 0;
+  renderLog();
+  await refreshSavedCount();
+}
+
+async function loadSaved(){
+  try{
+    const listing = await window.storage.list('xsec:', false);
+    if(!listing || !listing.keys) return;
+    for(const key of listing.keys){
+      try{
+        const res = await window.storage.get(key, false);
+        if(!res) continue;
+        const d = JSON.parse(res.value);
+        const positions = d.latlngs.map(p=>L.latLng(p.lat,p.lng));
+        const axis = reconstructAxisFromPositions(positions); // also auto-straightens any pre-fix bent saves
+        const dimLayer = L.layerGroup().addTo(map);
+        const visualLayer = L.layerGroup().addTo(dimLayer);
+        const markerLayer = L.layerGroup().addTo(dimLayer);
+        const actionLayer = L.layerGroup().addTo(dimLayer);
+        const nominalCenter = (d.nominalLat!==undefined && d.nominalLng!==undefined) ? L.latLng(d.nominalLat, d.nominalLng) : axis.center;
+        pcRegistry[d.pointCode] = {center:axis.center, dir:axis.dir, offsets:axis.offsets, nominalCenter, offsetFromNominal_m: d.offsetFromNominal_m||0, group: dimLayer, visualLayer, markerLayer, actionLayer, locked: !!d.locked, roadName: d.roadName||'',
+          sCode: d.sCode || '', pointCode: (d.rawPointCode !== undefined && d.rawPointCode !== null) ? d.rawPointCode : undefined, auditInfraId: d.auditInfraId,
+          median: !!d.median, medianHeight_m: d.medianHeight_m};
+        syncPositionsFromAxis(pcRegistry[d.pointCode]);
+        createPcMarkers(d.pointCode);
+        createRotateHandle(d.pointCode);
+        createMoveHandle(d.pointCode);
+        createActionIcon(d.pointCode);
+        if(pcRegistry[d.pointCode].locked) setMarkersInteractive(pcRegistry[d.pointCode], false);
+        redrawPc(d.pointCode);
+        records.push({pointCode:d.pointCode, roadName:d.roadName||'', footpathA_m:d.footpathA_m, carriageway_m:d.carriageway_m, footpathB_m:d.footpathB_m, row_total_m:d.row_total_m, roadWidthSideA_m:d.roadWidthSideA_m, medianWidth_m:d.medianWidth_m, roadWidthSideB_m:d.roadWidthSideB_m, median: !!d.median, medianHeight_m: d.medianHeight_m, latlngs:d.latlngs, nominalLat:nominalCenter.lat, nominalLng:nominalCenter.lng, offsetFromNominal_m:d.offsetFromNominal_m||0, sCode:d.sCode||'', rawPointCode:d.rawPointCode, auditInfraId:d.auditInfraId, savedAt:d.savedAt, locked: !!d.locked});
+      }catch(err){ console.error('load fail', key, err); }
+    }
+    try{
+      const imgListing = await window.storage.list('imgmeta:', false);
+      if(imgListing && imgListing.keys){
+        for(const key of imgListing.keys){
+          try{
+            const res = await window.storage.get(key, false);
+            if(!res) continue;
+            const d = JSON.parse(res.value);
+            // key is 'imgmeta:'+sanitizedCode -- find the matching real point code from records
+            const match = records.find(r=>sanitizeKey(r.pointCode) === key.slice('imgmeta:'.length));
+            if(match) imageMeta[match.pointCode] = d;
+          }catch(err){ console.error('imgmeta load fail', key, err); }
+        }
+      }
+    }catch(err){}
+    renderLog();
+    await refreshSavedCount();
+  }catch(err){}
+}
+loadSaved();
+
+// ---- training image capture ----
+const CAPTURE_ZOOM = 19; // matches maxNativeZoom on OSM/Esri, avoids upscale blur
+
+function waitMs(ms){ return new Promise(res=>setTimeout(res, ms)); }
+
+function bufferPixelRect(center, bufferM){
+  const originLat = center.lat;
+  const c = llToXY(center, originLat);
+  const nw = xyToLL(c.x-bufferM, c.y+bufferM, originLat);
+  const se = xyToLL(c.x+bufferM, c.y-bufferM, originLat);
+  const p1 = map.latLngToContainerPoint(nw);
+  const p2 = map.latLngToContainerPoint(se);
+  return {
+    x: Math.round(Math.min(p1.x,p2.x)), y: Math.round(Math.min(p1.y,p2.y)),
+    width: Math.round(Math.abs(p2.x-p1.x)), height: Math.round(Math.abs(p2.y-p1.y))
+  };
+}
+
+function downloadCanvasPng(canvas, filename){
+  return new Promise(resolve=>{
+    canvas.toBlob(blob=>{
+      if(!blob){ resolve(false); return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      resolve(true);
+    }, 'image/png');
+  });
+}
+
+// requests the drone/BBMP WMS layer directly at its own native resolution (~3-4cm/px per
+// the RDGIS technical note), instead of screenshotting Leaflet's on-screen tile pyramid.
+// Falls back to opening the image in a new tab (always works, no download automation) if the
+// server doesn't send CORS headers permitting pixel extraction.
+function buildDroneImageUrl(center, bufferM, pxSize){
+  const latRad = center.lat * Math.PI/180;
+  const bufferMerc = bufferM / Math.cos(latRad); // ground meters -> Web Mercator projected meters
+  const half = bufferMerc/2;
+  const cx = lngToMercX(center.lng), cy = latToMercY(center.lat);
+  const bbox = [cx-half, cy-half, cx+half, cy+half].join(',');
+  const params = new URLSearchParams({
+    SERVICE:'WMS', VERSION:'1.1.1', REQUEST:'GetMap',
+    LAYERS: WMS_LAYER, STYLES:'', FORMAT:'image/png', TRANSPARENT:'false',
+    WIDTH:pxSize, HEIGHT:pxSize, SRS:'EPSG:3857', BBOX:bbox
+  });
+  return `${WMS_URL}?${params.toString()}`;
+}
+
+// draws the same halo dimension line/ticks/labels used on-map, but directly onto a plain
+// canvas using the image's own pixel geometry -- independent of Leaflet's current zoom/pan.
+function drawDimensionOnCanvas(ctx, pc, center, bufferM, pxW, pxH){
+  const originLat = center.lat;
+  const pxPerM = pxW / bufferM;
+  const toPx = (latlng)=>{
+    const dx = (latlng.lng-center.lng) * mPerDegLng(originLat);
+    const dy = (latlng.lat-center.lat) * mPerDegLat();
+    return {x: pxW/2 + dx*pxPerM, y: pxH/2 - dy*pxPerM};
+  };
+  const pts = pc.positions.map(toPx);
+
+  function haloLine(p1,p2,w){
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = w+3;
+    ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+  }
+  for(let i=0;i<3;i++) haloLine(pts[i], pts[i+1], 2.5);
+
+  const axisDx = pts[3].x-pts[0].x, axisDy = pts[3].y-pts[0].y;
+  const axisLen = Math.hypot(axisDx,axisDy) || 1;
+  const perp = {x:-axisDy/axisLen, y:axisDx/axisLen};
+  pts.forEach(p=>haloLine({x:p.x+perp.x*7,y:p.y+perp.y*7}, {x:p.x-perp.x*7,y:p.y-perp.y*7}, 2.5));
+
+  function label(p1,p2,text){
+    const mx=(p1.x+p2.x)/2, my=(p1.y+p2.y)/2-8;
+    ctx.font = 'bold 14px Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeText(text, mx, my);
+    ctx.fillStyle = '#fff'; ctx.fillText(text, mx, my);
+  }
+  label(pts[0],pts[1], `Ft A · ${(pc.offsets[1]-pc.offsets[0]).toFixed(1)}m`);
+  label(pts[1],pts[2], `Carriageway · ${(pc.offsets[2]-pc.offsets[1]).toFixed(1)}m`);
+  label(pts[2],pts[3], `Ft B · ${(pc.offsets[3]-pc.offsets[2]).toFixed(1)}m`);
+
+  const dot = {x:(pts[1].x+pts[2].x)/2, y:(pts[1].y+pts[2].y)/2};
+  ctx.beginPath(); ctx.arc(dot.x,dot.y,6,0,2*Math.PI);
+  ctx.fillStyle = '#e0453a'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#000'; ctx.stroke();
+}
+
+// captures the drone image and returns the raw + annotated canvases, without uploading
+// anything -- used by both the standalone capture button and the combined save flow.
+async function captureDroneImageCanvas(code){
+  const pc = pcRegistry[code];
+  const bufferM = parseFloat(document.getElementById('imgBuffer').value) || 15;
+  const NATIVE_MPP = 0.037; // per the RDGIS technical note's documented resolution
+  const pxSize = Math.min(2048, Math.max(256, Math.round(bufferM/NATIVE_MPP)));
+  const url = buildDroneImageUrl(pc.center, bufferM, pxSize);
+
+  const img = await new Promise((resolve,reject)=>{
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.onload = ()=>resolve(im);
+    im.onerror = ()=>reject(new Error('image request failed'));
+    im.src = url;
+  });
+
+  const rawCanvas = document.createElement('canvas');
+  rawCanvas.width = img.width; rawCanvas.height = img.height;
+  rawCanvas.getContext('2d').drawImage(img,0,0);
+
+  const annCanvas = document.createElement('canvas');
+  annCanvas.width = img.width; annCanvas.height = img.height;
+  const actx = annCanvas.getContext('2d');
+  actx.drawImage(img,0,0);
+  drawDimensionOnCanvas(actx, pc, pc.center, bufferM, img.width, img.height);
+
+  return {rawCanvas, annCanvas, width: img.width, height: img.height, sourceUrl: url};
+}
+
+async function captureDroneImage(code){
+  const pc = pcRegistry[code];
+  if(!pc){ alert('Point code not found.'); return; }
+
+  const btn = document.getElementById('dronebtn-'+sanitizeKey(code));
+  if(btn){ btn.textContent = 'Loading…'; btn.disabled = true; }
+
+  try{
+    const cap = await captureDroneImageCanvas(code);
+    const rawName = `${sanitizeKey(code)}_drone_raw.png`;
+    const annName = `${sanitizeKey(code)}_drone_annotated.png`;
+    await downloadCanvasPng(cap.rawCanvas, rawName);
+    uploadImageToDrive(cap.rawCanvas, rawName, code, 'map_image');
+    await downloadCanvasPng(cap.annCanvas, annName);
+    uploadImageToDrive(cap.annCanvas, annName, code, 'annotated_image');
+
+    imageMeta[code] = {rawFilename: rawName, annotatedFilename: annName, capturedAt: new Date().toISOString(), source:'drone_wms'};
+    try{ await window.storage.set('imgmeta:'+sanitizeKey(code), JSON.stringify(imageMeta[code]), false); }catch(err){ console.error('imgmeta save failed', err); }
+    renderLog();
+    alert(`Captured native-resolution drone imagery for "${code}" (${cap.width}×${cap.height}px):\n${rawName}\n${annName}`);
+  }catch(err){
+    console.error('drone capture failed', code, err);
+    if(confirm(`Could not export this directly — the server likely doesn't allow cross-origin pixel access (this is a server-side setting, not something fixable from here). Open the image in a new tab instead, so you can save it yourself with a right-click?`)){
+      window.open(pc._lastCaptureUrl || '', '_blank');
+    }
+  } finally {
+    if(btn){ btn.textContent = '🛰️ Drone image'; btn.disabled = false; }
+  }
+}
+
+// runs captureCode/captureDroneImage across every saved point code, one at a time, so a single
+// click by the person works through the whole list -- still their click, just automated after that.
+async function captureAll(kind){
+  const codes = Object.keys(pcRegistry);
+  if(codes.length===0){ alert('No point codes saved yet.'); return; }
+  const statusEl = document.getElementById('captureAllStatus');
+  const fn = kind==='drone' ? captureDroneImage : captureCode;
+
+  for(let i=0;i<codes.length;i++){
+    statusEl.textContent = `Capturing ${codes[i]} (${i+1}/${codes.length})…`;
+    try{ await fn(codes[i]); }
+    catch(err){ console.error('batch capture failed for', codes[i], err); }
+    await waitMs(400); // brief gap between codes so downloads/uploads don't overlap
+  }
+  statusEl.textContent = `Done — worked through ${codes.length} point code(s). Check the downloads folder (and Drive, if configured) to confirm nothing came out blank.`;
+}
+
+async function captureCode(code){
+  const pc = pcRegistry[code];
+  if(!pc){ alert('Point code not found.'); return; }
+  if(typeof html2canvas === 'undefined'){ alert('Screenshot library failed to load — check your connection and reload the page.'); return; }
+
+  const bufferM = parseFloat(document.getElementById('imgBuffer').value) || 15;
+  const originalCenter = map.getCenter(), originalZoom = map.getZoom();
+  const btn = document.getElementById('capbtn-'+sanitizeKey(code));
+  if(btn){ btn.textContent = 'Capturing…'; btn.disabled = true; }
+
+  try{
+    map.setView(pc.center, CAPTURE_ZOOM, {animate:false});
+    await waitMs(1200); // let tiles finish loading at the new view
+
+    const rect = bufferPixelRect(pc.center, bufferM);
+    const mapEl = document.getElementById('map');
+
+    // hide every point code's overlay for the clean shot
+    Object.values(pcRegistry).forEach(p=>{ if(map.hasLayer(p.group)) map.removeLayer(p.group); });
+    await waitMs(50);
+
+    const canvasClean = await html2canvas(mapEl, {x:rect.x, y:rect.y, width:rect.width, height:rect.height, useCORS:true, logging:false, backgroundColor:null});
+    const rawName = `${sanitizeKey(code)}_raw.png`;
+    await downloadCanvasPng(canvasClean, rawName);
+    uploadImageToDrive(canvasClean, rawName, code, 'map_image');
+
+    // show only this code's dimension lines/labels (not the drag ticks/rotate handle) for the annotated shot
+    pc.visualLayer.addTo(map);
+    await waitMs(50);
+    const canvasAnnotated = await html2canvas(mapEl, {x:rect.x, y:rect.y, width:rect.width, height:rect.height, useCORS:true, logging:false, backgroundColor:null});
+    const annName = `${sanitizeKey(code)}_annotated.png`;
+    await downloadCanvasPng(canvasAnnotated, annName);
+    uploadImageToDrive(canvasAnnotated, annName, code, 'annotated_image');
+    map.removeLayer(pc.visualLayer);
+
+    // restore all point code overlays
+    Object.values(pcRegistry).forEach(p=>{ if(!map.hasLayer(p.group)) p.group.addTo(map); });
+
+    imageMeta[code] = {rawFilename: rawName, annotatedFilename: annName, capturedAt: new Date().toISOString()};
+    try{ await window.storage.set('imgmeta:'+sanitizeKey(code), JSON.stringify(imageMeta[code]), false); }catch(err){ console.error('imgmeta save failed', err); }
+
+    renderLog();
+    alert(`Captured "${code}":\n${rawName}\n${annName}\n\nIf either image looks blank when you open it, that basemap likely blocked cross-origin export — try switching to Esri Satellite and re-capturing.`);
+  } finally {
+    map.setView(originalCenter, originalZoom, {animate:false});
+    if(btn){ btn.textContent = '📷 Capture'; btn.disabled = false; }
+  }
+}
+
+function exportExcel(){
+  if(records.length===0){ alert('No point codes saved yet.'); return; }
+  if(typeof XLSX === 'undefined'){ alert('Excel library failed to load — check your connection and reload the page.'); return; }
+
+  const rows = records.map(r=>{
+    const img = imageMeta[r.pointCode] || {};
+    const pcInfo = pcRegistry[r.pointCode] || {};
+    return {
+      'Point Code (tool ID)': r.pointCode,
+      'S Code': pcInfo.sCode || '',
+      'Point Code (number)': pcInfo.pointCode !== undefined ? pcInfo.pointCode : r.pointCode,
+      'Footpath A width (m)': +r.footpathA_m.toFixed(2),
+      'Carriageway width (m)': +r.carriageway_m.toFixed(2),
+      'Footpath B width (m)': +r.footpathB_m.toFixed(2),
+      'Total ROW (m)': +r.row_total_m.toFixed(2),
+      'Road name': r.roadName || '',
+      'Offset from nominal (m)': +(r.offsetFromNominal_m||0).toFixed(1),
+      'Nominal latitude': r.nominalLat !== undefined ? +r.nominalLat.toFixed(6) : '',
+      'Nominal longitude': r.nominalLng !== undefined ? +r.nominalLng.toFixed(6) : '',
+      'Image 1 (no annotation)': img.rawFilename || '',
+      'Image 2 (annotated)': img.annotatedFilename || '',
+      'Saved at': r.savedAt || ''
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Point Codes');
+  XLSX.writeFile(wb, 'point_codes.xlsx');
+}
+
+// ---- Google Sheet sync (via a small Apps Script Web App you deploy on your own sheet) ----
+let sheetSyncUrl = 'https://script.google.com/macros/s/AKfycbyZBY1zjUQDiziVfF-Rxn_V8gc5n-HP83uAxLALf2TUhp-gm63g4c4B5ukyw8vsFNTB/exec';
+
+async function loadSheetSyncUrl(){
+  try{
+    const res = await window.storage.get('config:sheetSyncUrl', false);
+    if(res && res.value){
+      sheetSyncUrl = res.value;
+      document.getElementById('sheetSyncUrl').value = sheetSyncUrl;
+    }
+  }catch(err){ /* nothing saved yet, or storage unavailable this session */ }
+}
+
+document.getElementById('sheetSyncUrl').addEventListener('change', async e=>{
+  sheetSyncUrl = e.target.value.trim();
+  try{ await window.storage.set('config:sheetSyncUrl', sheetSyncUrl, false); }catch(err){ console.error('could not save sync URL', err); }
+});
+
+// shows the exact JSON about to be POSTed to the sheet, so a person can visually confirm
+// s_code/point_code (or anything else) is actually populated before it goes out -- since the
+// request is no-cors, the browser can never show us a response to check afterward.
+function showOutgoingPayload(payload){
+  const el = document.getElementById('lastPayloadPreview');
+  if(!el) return;
+  const trimmed = {...payload};
+  if(trimmed.raw_base64) trimmed.raw_base64 = `[base64, ${trimmed.raw_base64.length} chars]`;
+  if(trimmed.annotated_base64) trimmed.annotated_base64 = `[base64, ${trimmed.annotated_base64.length} chars]`;
+  if(trimmed.base64) trimmed.base64 = `[base64, ${trimmed.base64.length} chars]`;
+  el.textContent = JSON.stringify(trimmed, null, 2);
+}
+
+// combined save: sheet row + both images, all in ONE request, so there is only ever a
+// single row lookup on the server -- eliminates the 3-separate-requests race that was
+// causing measurements and image links to land in different rows.
+async function saveEverythingToSheet(code){
+  if(!sheetSyncUrl) return {ok:false};
+  const pc = pcRegistry[code];
+  const rec = records.find(r=>r.pointCode===code);
+  if(!pc || !rec) return {ok:false};
+
+  const rawName = `${sanitizeKey(code)}_drone_raw.png`;
+  const annName = `${sanitizeKey(code)}_drone_annotated.png`;
+  let rawBase64 = null, annBase64 = null, capturedOk = false;
+
+  try{
+    const cap = await captureDroneImageCanvas(code);
+    rawBase64 = cap.rawCanvas.toDataURL('image/png');
+    annBase64 = cap.annCanvas.toDataURL('image/png');
+    capturedOk = true;
+  }catch(err){
+    console.error('drone image capture failed, saving sheet row without images', code, err);
+  }
+
+  const payload = {
+    type: 'full_save',
+    s_code: pc.sCode || '',
+    point_code: pc.pointCode !== undefined ? pc.pointCode : code,
+    latitude_longitude: `${pc.center.lat.toFixed(6)}, ${pc.center.lng.toFixed(6)}`,
+    footpath_side_a: Number(rec.footpathA_m.toFixed(2)),
+    carriage_way: Number(rec.carriageway_m.toFixed(2)), // always the full road width, median or not
+    footpath_side_b: Number(rec.footpathB_m.toFixed(2)),
+    row_total: Number(rec.row_total_m.toFixed(2)),
+    offset_distance: Number((rec.offsetFromNominal_m||0).toFixed(1)),
+    timestamp: new Date().toISOString(),
+    median: !!rec.median,
+    road_width_side_a: rec.median ? Number(rec.roadWidthSideA_m.toFixed(2)) : '',
+    median_width: rec.median ? Number(rec.medianWidth_m.toFixed(2)) : '',
+    median_height: (rec.median && pc.medianHeight_m !== undefined) ? Number(pc.medianHeight_m) : '',
+    road_width_side_b: rec.median ? Number(rec.roadWidthSideB_m.toFixed(2)) : '',
+    raw_filename: rawName, annotated_filename: annName,
+    raw_base64: rawBase64, annotated_base64: annBase64
+  };
+
+  showOutgoingPayload(payload);
+  try{
+    await fetch(sheetSyncUrl, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify(payload)
+    });
+  }catch(err){ console.error('combined save failed', code, err); return {ok:false}; }
+
+  if(capturedOk){
+    imageMeta[code] = {rawFilename: rawName, annotatedFilename: annName, capturedAt: new Date().toISOString(), source:'drone_wms'};
+    try{ await window.storage.set('imgmeta:'+sanitizeKey(code), JSON.stringify(imageMeta[code]), false); }catch(err){}
+  }
+  return {ok:true, hasImages: capturedOk};
+}
+
+// ---- Database backend sync (a small Flask proxy in front of Postgres -- see db-backend/) ----
+let dbBackendUrl = '';
+let dbApiToken = '';
+
+async function loadDbConfig(){
+  try{
+    const urlRes = await window.storage.get('config:dbBackendUrl', false);
+    if(urlRes && urlRes.value){ dbBackendUrl = urlRes.value; document.getElementById('dbBackendUrl').value = dbBackendUrl; }
+    const tokRes = await window.storage.get('config:dbApiToken', false);
+    if(tokRes && tokRes.value){ dbApiToken = tokRes.value; document.getElementById('dbApiToken').value = dbApiToken; }
+  }catch(err){ /* nothing saved yet, or storage unavailable this session */ }
+}
+
+document.getElementById('dbBackendUrl').addEventListener('change', async e=>{
+  dbBackendUrl = e.target.value.trim().replace(/\/$/, '');
+  try{ await window.storage.set('config:dbBackendUrl', dbBackendUrl, false); }catch(err){ console.error('could not save db backend url', err); }
+});
+document.getElementById('dbApiToken').addEventListener('change', async e=>{
+  dbApiToken = e.target.value.trim();
+  try{ await window.storage.set('config:dbApiToken', dbApiToken, false); }catch(err){ console.error('could not save db api token', err); }
+});
+
+// geometry sent as plain [lng,lat] coordinate pairs -- the backend builds the actual PostGIS
+// geometry (ST_MakeLine/ST_MakePoint with SRID 4326), so the browser never needs to know WKT.
+function buildRoadPayload(code){
+  const pc = pcRegistry[code];
+  const rec = records.find(r=>r.pointCode===code);
+  if(!pc || !rec) return null;
+  const n = pc.positions.length;
+  const pFA = pc.positions[1], pFB = pc.positions[n-2];
+  return {
+    audit_infra_id: pc.auditInfraId,
+    point_code: pc.pointCode !== undefined ? pc.pointCode : null,
+    median: !!pc.median,
+    road_width: pc.median ? null : Number(rec.carriageway_m.toFixed(2)),
+    road_width_side_a: pc.median ? Number(rec.roadWidthSideA_m.toFixed(2)) : null,
+    median_width: pc.median ? Number(rec.medianWidth_m.toFixed(2)) : null,
+    median_height: (pc.median && pc.medianHeight_m !== undefined) ? Number(pc.medianHeight_m) : null,
+    road_width_side_b: pc.median ? Number(rec.roadWidthSideB_m.toFixed(2)) : null,
+    geometry_coords: [[pFA.lng, pFA.lat], [pFB.lng, pFB.lat]],
+    data_collection_timestamp: new Date().toISOString()
+  };
+}
+
+function buildFootpathPayloads(code){
+  const pc = pcRegistry[code];
+  const rec = records.find(r=>r.pointCode===code);
+  if(!pc || !rec) return [];
+  const n = pc.positions.length;
+  const pA = pc.positions[0], pFA = pc.positions[1], pFB = pc.positions[n-2], pB = pc.positions[n-1];
+  const ts = new Date().toISOString();
+  const base = { audit_infra_id: pc.auditInfraId, point_code: pc.pointCode !== undefined ? pc.pointCode : null, data_collection_timestamp: ts };
+  return [
+    {...base, side:'A', footpath_width_m: Number(rec.footpathA_m.toFixed(2)), geometry_coords: [[pA.lng,pA.lat],[pFA.lng,pFA.lat]]},
+    {...base, side:'B', footpath_width_m: Number(rec.footpathB_m.toFixed(2)), geometry_coords: [[pFB.lng,pFB.lat],[pB.lng,pB.lat]]}
+  ];
+}
+
+async function postToDb(path, payload){
+  showOutgoingPayload(payload);
+  const res = await fetch(dbBackendUrl + path, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${dbApiToken}`},
+    body: JSON.stringify(payload)
+  });
+  const body = await res.json().catch(()=>({status:'error', message:'non-JSON response'}));
+  if(!res.ok || body.status !== 'ok') throw new Error(body.message || `HTTP ${res.status}`);
+  return body;
+}
+
+async function saveToDatabase(code){
+  const pc = pcRegistry[code];
+  if(!pc) return {ok:false};
+  if(!dbBackendUrl){ console.warn('no database backend URL configured -- skipping DB save for', code); return {ok:false}; }
+  if(!pc.auditInfraId){
+    alert(`"${code}" has no audit_infra_id (that's only present on point codes placed from an uploaded list) -- can't save to the database. Manually-typed point codes aren't supported for database save.`);
+    return {ok:false};
+  }
+  const statusEl = document.getElementById('dbSyncStatus');
+  if(statusEl) statusEl.textContent = `Saving "${code}" to the database…`;
+  try{
+    await postToDb('/api/road', buildRoadPayload(code));
+    for(const fp of buildFootpathPayloads(code)) await postToDb('/api/footpath', fp);
+    if(statusEl) statusEl.textContent = `"${code}" saved to the database (road + both footpath sides).`;
+    return {ok:true};
+  }catch(err){
+    console.error('database save failed', code, err);
+    if(statusEl) statusEl.textContent = `Database save FAILED for "${code}": ${err.message}`;
+    alert(`Database save failed for "${code}": ${err.message}`);
+    return {ok:false};
+  }
+}
+
+async function syncAllToDb(){
+  alert('Database sync is temporarily disabled -- the tool is back on the Google Sheet for now. Remove this early-return in syncAllToDb() (and the matching comment-out in toggleLock) to re-enable.');
+  return;
+  // eslint-disable-next-line no-unreachable
+  if(!dbBackendUrl){ alert('Enter the database backend URL first.'); return; }
+  if(records.length===0){ alert('No point codes saved yet.'); return; }
+  const statusEl = document.getElementById('dbSyncStatus');
+  let failed = 0;
+  for(let i=0;i<records.length;i++){
+    statusEl.textContent = `Syncing ${records[i].pointCode} (${i+1}/${records.length})…`;
+    const result = await saveToDatabase(records[i].pointCode);
+    if(!result.ok) failed++;
+  }
+  statusEl.textContent = `Synced ${records.length - failed}/${records.length} point code(s) to the database.` + (failed>0 ? ` ${failed} failed -- see alerts/console.` : '');
+}
+
+// uploads a captured canvas straight to the Drive folder via the same Apps Script endpoint --
+// the script writes the resulting link into map_image/annotated_image itself (see note in the
+// .gs file) since this no-cors request can't read a response back here to do it client-side.
+async function uploadImageToDrive(canvas, filename, code, imageKind){
+  if(!sheetSyncUrl) return;
+  const pc = pcRegistry[code];
+  const base64 = canvas.toDataURL('image/png');
+  const payload = {
+    type:'image', filename, base64, image_kind: imageKind,
+    point_code: pc && pc.pointCode !== undefined ? pc.pointCode : code,
+    s_code: (pc && pc.sCode) || ''
+  };
+  showOutgoingPayload(payload);
+  try{
+    await fetch(sheetSyncUrl, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify(payload)
+    });
+  }catch(err){ console.error('drive upload failed for', filename, err); }
+}
+
+loadSheetSyncUrl();
+loadDbConfig();
+
+function exportData(fmt){
+  if(records.length===0){ alert('No point codes saved yet.'); return; }
+  let content, mime, ext;
+  if(fmt==='geojson'){
+    const features = records.map(r=>({
+      type:'Feature',
+      properties:{point_code:r.pointCode, road_name:r.roadName, footpathA_m:r.footpathA_m, carriageway_m:r.carriageway_m, footpathB_m:r.footpathB_m, row_total_m:r.row_total_m, offset_from_nominal_m:r.offsetFromNominal_m||0, nominal_lat:r.nominalLat, nominal_lng:r.nominalLng, saved_at:r.savedAt||''},
+      geometry:{type:'LineString', coordinates:r.latlngs.map(p=>[p.lng,p.lat])}
+    }));
+    content = JSON.stringify({type:'FeatureCollection', features}, null, 2);
+    mime='application/geo+json'; ext='geojson';
+  } else {
+    const rows = ['point_code,footpathA_m,carriageway_m,footpathB_m,row_total_m,road_name,offset_from_nominal_m,nominal_lat,nominal_lng,lat_buildingA,lng_buildingA,lat_buildingB,lng_buildingB'];
+    records.forEach(r=>{
+      const p1=r.latlngs[0], p2=r.latlngs[3];
+      rows.push([`"${r.pointCode.replace(/"/g,'""')}"`, r.footpathA_m.toFixed(3), r.carriageway_m.toFixed(3), r.footpathB_m.toFixed(3), r.row_total_m.toFixed(3), `"${(r.roadName||'').replace(/"/g,'""')}"`, (r.offsetFromNominal_m||0).toFixed(1), r.nominalLat??'', r.nominalLng??'', p1.lat, p1.lng, p2.lat, p2.lng].join(','));
+    });
+    content = rows.join('\n');
+    mime='text/csv'; ext='csv';
+  }
+  const blob = new Blob([content], {type:mime});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `point_codes.${ext}`;
+  a.click();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: drone-profiler-db-backend
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: API_TOKEN
+        sync: false
