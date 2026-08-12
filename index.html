@@ -354,7 +354,7 @@ function extractPcCode(props, fallbackIndex){
 // point_code alone is only unique WITHIN one s_code (e.g. point_code=8 exists under many
 // different s_codes) -- so the map/tool identifier combines both, while the raw values are
 // kept for writing into their own separate sheet columns later.
-const S_CODE_KEYS = ['s_code','S_Code','SCode','scode'];
+const S_CODE_KEYS = ['code','Code','s_code','S_Code','SCode','scode'];
 const POINT_CODE_ONLY_KEYS = ['point_code','Point_Code','PointCode','pointcode'];
 
 // property key lookup is case/underscore-variant tolerant -- GIS exports (GeoJSON/KML) commonly
@@ -1495,6 +1495,7 @@ async function saveEverythingToSheet(code){
     type: 'full_save',
     s_code: pc.sCode || '',
     point_code: pc.pointCode !== undefined ? pc.pointCode : code,
+    audit_infra_id: pc.auditInfraId !== undefined ? pc.auditInfraId : '',
     latitude_longitude: `${pc.center.lat.toFixed(6)}, ${pc.center.lng.toFixed(6)}`,
     footpath_side_a: Number(rec.footpathA_m.toFixed(2)),
     carriage_way: Number(rec.carriageway_m.toFixed(2)), // always the full road width, median or not
