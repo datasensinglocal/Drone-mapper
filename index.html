@@ -1498,6 +1498,7 @@ async function saveEverythingToSheet(code){
     audit_infra_id: pc.auditInfraId !== undefined ? pc.auditInfraId : '',
     latitude_longitude: `${pc.center.lat.toFixed(6)}, ${pc.center.lng.toFixed(6)}`,
     footpath_side_a: Number(rec.footpathA_m.toFixed(2)),
+    road_width: rec.median ? '' : Number(rec.carriageway_m.toFixed(2)),
     carriage_way: Number(rec.carriageway_m.toFixed(2)), // always the full road width, median or not
     footpath_side_b: Number(rec.footpathB_m.toFixed(2)),
     row_total: Number(rec.row_total_m.toFixed(2)),
