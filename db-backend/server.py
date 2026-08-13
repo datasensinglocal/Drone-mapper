@@ -7,9 +7,19 @@ server does the actual parameterized INSERT/UPSERT.
 REAL SCHEMA NOTES (see db-backend/check_db2.py output for how these were confirmed):
   - road_profile unique key:     (audit_infra_id, point_code)
   - footpath_profile unique key: (audit_infra_id, side, point_code)
-  - audit_infra_id is the real numeric audit_infrastructure.id -- the frontend reads it
-    directly off the uploaded point-code list (each point already carries {id, point_code,
-    code}), so this server never needs to resolve an s_code -> id itself.
+
+  *** KNOWN BROKEN, DO NOT TRUST UNTIL FIXED (2026-08-12) ***
+  road_id and audit_infra_id are CONFIRMED DIFFERENT, UNRELATED values (per the user,
+  2026-08-12) -- audit_infra_id is not derivable from road_id by any mapping known so far.
+  The point-code list's "id" property (what the frontend calls road_id) is NOT the same
+  thing as audit_infra_id. road_profile/footpath_profile only have an audit_infra_id column
+  (no road_id column exists there at all -- confirmed via check_db2.py's column dump), so
+  this endpoint currently does something WRONG: it takes the incoming road_id and writes it
+  straight into the audit_infra_id column below, as if they were the same number. They are
+  not. Do not re-enable/rely on this endpoint for real writes until there's an actual known
+  way to resolve the correct audit_infra_id (whatever that lookup turns out to be -- possibly
+  via audit_infrastructure, possibly something else entirely; not yet investigated). This is
+  harmless right now only because the whole DB save path is disabled in index.html.
   - geometry columns are PostGIS GEOMETRY(SRID 4326). The frontend sends plain [[lng,lat],
     [lng,lat]] coordinate pairs; this server builds the line via ST_MakeLine/ST_MakePoint.
   - form_filled and approved_status are NOT NULL but have DB defaults (false) -- never sent,
@@ -66,10 +76,8 @@ def geometry_sql(coords):
 @require_auth
 def save_road():
     data = request.get_json(force=True)
-    required = ["audit_infra_id", "point_code", "median", "geometry_coords"]
-    missing = [k for k in required if data.get(k) is None and k != "median"]
-    if "audit_infra_id" not in data or data["audit_infra_id"] is None:
-        return jsonify({"status": "error", "message": "audit_infra_id is required"}), 400
+    if "road_id" not in data or data["road_id"] is None:
+        return jsonify({"status": "error", "message": "road_id is required"}), 400
     if "point_code" not in data or data["point_code"] is None:
         return jsonify({"status": "error", "message": "point_code is required"}), 400
     if not data.get("geometry_coords"):
@@ -77,13 +85,15 @@ def save_road():
 
     geom_sql, geom_params = geometry_sql(data["geometry_coords"])
 
+    # KNOWN WRONG -- see the *** KNOWN BROKEN *** note at the top of this file. road_id is
+    # NOT audit_infra_id; this write needs a real resolution step before it can be trusted.
     columns = [
         "audit_infra_id", "point_code", "median", "road_width",
         "road_width_side_a", "median_width", "median_height", "road_width_side_b",
         "data_collection_timestamp", "geometry",
     ]
     values = [
-        data["audit_infra_id"], data["point_code"], bool(data.get("median")), data.get("road_width"),
+        data["road_id"], data["point_code"], bool(data.get("median")), data.get("road_width"),
         data.get("road_width_side_a"), data.get("median_width"), data.get("median_height"), data.get("road_width_side_b"),
         data.get("data_collection_timestamp"),
     ]
@@ -113,8 +123,8 @@ def save_road():
 @require_auth
 def save_footpath():
     data = request.get_json(force=True)
-    if "audit_infra_id" not in data or data["audit_infra_id"] is None:
-        return jsonify({"status": "error", "message": "audit_infra_id is required"}), 400
+    if "road_id" not in data or data["road_id"] is None:
+        return jsonify({"status": "error", "message": "road_id is required"}), 400
     if "point_code" not in data or data["point_code"] is None:
         return jsonify({"status": "error", "message": "point_code is required"}), 400
     if data.get("side") not in ("A", "B"):
@@ -124,12 +134,13 @@ def save_footpath():
 
     geom_sql, geom_params = geometry_sql(data["geometry_coords"])
 
+    # KNOWN WRONG -- see the *** KNOWN BROKEN *** note at the top of this file.
     columns = [
         "audit_infra_id", "point_code", "side", "footpath_width_m",
         "data_collection_timestamp", "geometry",
     ]
     values = [
-        data["audit_infra_id"], data["point_code"], data["side"], data.get("footpath_width_m"),
+        data["road_id"], data["point_code"], data["side"], data.get("footpath_width_m"),
         data.get("data_collection_timestamp"),
     ]
 

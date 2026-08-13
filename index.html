@@ -130,6 +130,7 @@
           <span id="currentPcLabel" style="flex:1;font-size:12px;font-weight:600;"></span>
           <button id="currentPcSaveBtn" style="width:auto;padding:6px 10px;" onclick="toggleLock(selectedPointCode)"></button>
         </div>
+        <div id="currentPcIds" class="hint" style="margin-top:2px;"></div>
         <div class="row" style="margin-top:6px;">
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;flex:1;">
             <input type="checkbox" id="currentPcMedianToggle" onchange="setMedianMode(selectedPointCode, this.checked)"/>
@@ -157,9 +158,9 @@
           </div>
           <div class="hint" id="captureAllStatus"></div>
           <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);">
-            <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin-bottom:6px;">Drive image upload (Apps Script)</div>
+            <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin-bottom:6px;">Google Sheet + Drive sync (Apps Script)</div>
             <input type="text" id="sheetSyncUrl" value="https://script.google.com/macros/s/AKfycbyZBY1zjUQDiziVfF-Rxn_V8gc5n-HP83uAxLALf2TUhp-gm63g4c4B5ukyw8vsFNTB/exec" style="margin-bottom:6px;"/>
-            <div class="hint">Only used for uploading the raw/annotated drone screenshots to Drive. Measurement data no longer goes here.</div>
+            <div class="hint">Writes to 3 tabs in one Sheet document -- "Road", "Footpath" (2 rows/point), "ROW" (right-of-way + carriageway summary) -- plus uploads drone screenshots to Drive.</div>
           </div>
           <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line);">
             <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-dim);margin-bottom:6px;">Database backend</div>
@@ -368,22 +369,43 @@ function extractPropByKeys(props, keys){
   return undefined;
 }
 
-// the database's road code (our "S-code") is only unique WITHIN a project, so resolving it
-// to the right row would need a project_id. The point-code list already carries the real
-// road_id directly (confirmed format: {id, point_code, code}), so we read that straight off
-// instead of ever resolving s_code -> id ourselves.
-const ROAD_ID_KEYS = ['id','Id','ID','road_id','Road_Id'];
+// Five DIFFERENT ids can exist for one physical point (2026-08-13, see explaining_codes.txt):
+//   project_id      -- unique per corporation only
+//   s_code          -- unique per corporation only (repeats across corporations, e.g. every
+//                       corporation has its own "S-001")
+//   audit_infra_id  -- globally unique, refers to the whole road SEGMENT (shared by every
+//                       point_code along that segment)
+//   road_id         -- globally unique, refers to ONLY the road/carriageway at this one point
+//   footpath_id_a/b -- globally unique, one per footpath SIDE at this one point (2 per point)
+// s_code+point_code alone ("S-001-1") is NOT a safe unique key -- it collides across
+// corporations. road_id IS safe on its own (one specific point, globally unique), so it's
+// used as the map/tool lookup key below; s_code/point_code/audit_infra_id are kept purely
+// for human display and future sheet/DB columns.
+const PROJECT_ID_KEYS = ['project_id','Project_Id','ProjectId','projectid'];
+const AUDIT_INFRA_ID_KEYS = ['audit_infra_id','Audit_Infra_Id','AuditInfraId'];
+const ROAD_ID_KEYS = ['road_id','Road_Id','RoadId','id','Id','ID']; // "id" kept as a loose fallback for older files
+const FOOTPATH_ID_A_KEYS = ['footpath_id_a','Footpath_Id_A','FootpathIdA'];
+const FOOTPATH_ID_B_KEYS = ['footpath_id_b','Footpath_Id_B','FootpathIdB'];
+
+function numOrUndef(v){ return v !== undefined ? Number(v) : undefined; }
 
 function extractPcIdentity(props, fallbackIndex){
   const sCode = extractPropByKeys(props, S_CODE_KEYS);
   const pointCode = extractPropByKeys(props, POINT_CODE_ONLY_KEYS);
-  const roadIdRaw = extractPropByKeys(props, ROAD_ID_KEYS);
-  const roadId = roadIdRaw !== undefined ? Number(roadIdRaw) : undefined;
-  if(sCode !== undefined && pointCode !== undefined){
-    return {code: `${sCode}-${pointCode}`, sCode, pointCode, roadId};
-  }
-  const code = extractPcCode(props, fallbackIndex);
-  return {code, sCode: sCode || '', pointCode: pointCode !== undefined ? pointCode : code, roadId};
+  const projectId = numOrUndef(extractPropByKeys(props, PROJECT_ID_KEYS));
+  const auditInfraId = numOrUndef(extractPropByKeys(props, AUDIT_INFRA_ID_KEYS));
+  const roadId = numOrUndef(extractPropByKeys(props, ROAD_ID_KEYS));
+  const footpathIdA = numOrUndef(extractPropByKeys(props, FOOTPATH_ID_A_KEYS));
+  const footpathIdB = numOrUndef(extractPropByKeys(props, FOOTPATH_ID_B_KEYS));
+
+  const label = (sCode !== undefined && pointCode !== undefined) ? `${sCode}-${pointCode}` : extractPcCode(props, fallbackIndex);
+  const code = roadId !== undefined ? String(roadId) : label; // the actual map/registry key
+
+  return {
+    code, label,
+    sCode: sCode || '', pointCode: pointCode !== undefined ? pointCode : label,
+    projectId, auditInfraId, roadId, footpathIdA, footpathIdB
+  };
 }
 
 document.getElementById('pcListInput').addEventListener('change', e=>{
@@ -399,7 +421,9 @@ document.getElementById('pcListInput').addEventListener('change', e=>{
       pointCodeList = points.map((f,i)=>{
         const identity = extractPcIdentity(f.properties, i);
         return {
-          code: identity.code, sCode: identity.sCode, pointCode: identity.pointCode, roadId: identity.roadId,
+          code: identity.code, label: identity.label, sCode: identity.sCode, pointCode: identity.pointCode,
+          projectId: identity.projectId, auditInfraId: identity.auditInfraId, roadId: identity.roadId,
+          footpathIdA: identity.footpathIdA, footpathIdB: identity.footpathIdB,
           latlng: L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]),
           status: pcRegistry[identity.code] ? 'done' : 'pending',
           properties: f.properties || {}
@@ -407,19 +431,22 @@ document.getElementById('pcListInput').addEventListener('change', e=>{
       });
       const missingId = pointCodeList.filter(p=>p.roadId===undefined || Number.isNaN(p.roadId));
       if(missingId.length>0){
-        alert(`Warning: ${missingId.length} of ${pointCodeList.length} point(s) in this file have no numeric "id" property -- those can't be saved to the database (road_id is required). Check the file has an "id" field on every point.`);
+        alert(`Warning: ${missingId.length} of ${pointCodeList.length} point(s) in this file have no numeric road_id -- those risk colliding with same-named points from other corporations, and can't be saved to the database. Check the file has a "road_id" field on every point.`);
       }
-      // heal any already-placed point codes that predate the sCode/pointCode/roadId
-      // persistence fix -- they'd otherwise keep sending blank/missing values forever.
+      // heal any already-placed point codes that predate this ID-tracking fix -- they'd
+      // otherwise keep sending blank/missing values forever.
       let healed = 0;
       pointCodeList.forEach(entry=>{
         const pc = pcRegistry[entry.code];
-        if(pc && !pc.sCode && !pc.pointCode && !pc.roadId && (entry.sCode || entry.pointCode !== entry.code || entry.roadId !== undefined)){
-          pc.sCode = entry.sCode; pc.pointCode = entry.pointCode; pc.roadId = entry.roadId; healed++;
+        if(pc && !pc.sCode && !pc.pointCode && !pc.auditInfraId && (entry.sCode || entry.pointCode !== entry.code || entry.auditInfraId !== undefined)){
+          pc.sCode = entry.sCode; pc.pointCode = entry.pointCode; pc.projectId = entry.projectId;
+          pc.auditInfraId = entry.auditInfraId; pc.roadId = entry.roadId;
+          pc.footpathIdA = entry.footpathIdA; pc.footpathIdB = entry.footpathIdB;
+          healed++;
           refreshPcTooltip(entry.code);
         }
       });
-      if(healed>0) console.log(`Backfilled sCode/pointCode/roadId for ${healed} previously-placed point code(s).`);
+      if(healed>0) console.log(`Backfilled IDs for ${healed} previously-placed point code(s).`);
       renderPcList();
       document.getElementById('pcListContainer').style.display = 'block';
       if(pointCodeList.length){
@@ -431,10 +458,21 @@ document.getElementById('pcListInput').addEventListener('change', e=>{
   reader.readAsText(file);
 });
 
+// datalist shows the human-readable S-code-point_code label, not the raw road_id key --
+// searchGo() below resolves a typed label back to the actual registry/list key.
 function updateSearchDatalist(){
   const dl = document.getElementById('pcCodeOptions');
-  const codes = new Set([...Object.keys(pcRegistry), ...pointCodeList.map(p=>p.code)]);
-  dl.innerHTML = [...codes].sort().map(c=>`<option value="${c.replace(/"/g,'&quot;')}">`).join('');
+  const labels = new Set();
+  Object.keys(pcRegistry).forEach(code=>labels.add(pcLabelOf(code)));
+  pointCodeList.forEach(p=>labels.add(pcLabelOf(p.code)));
+  dl.innerHTML = [...labels].sort().map(c=>`<option value="${c.replace(/"/g,'&quot;')}">`).join('');
+}
+
+function pcLabelOf(code){
+  const pc = pcRegistry[code];
+  if(pc) return (pc.sCode && pc.pointCode !== undefined) ? `${pc.sCode}-${pc.pointCode}` : code;
+  const entry = pointCodeList.find(p=>p.code===code);
+  return entry ? entry.label : code;
 }
 
 function flashPc(code){
@@ -453,13 +491,19 @@ function searchGo(){
   if(!raw) return;
   const lower = raw.toLowerCase();
 
-  // exact match in generated point codes first
-  let code = Object.keys(pcRegistry).find(c=>c.toLowerCase()===lower);
-  if(!code) code = Object.keys(pcRegistry).find(c=>c.toLowerCase().includes(lower));
+  // exact match in generated point codes first -- by human label, falling back to the raw
+  // road_id key itself (useful if someone searches by that number directly)
+  let code = Object.keys(pcRegistry).find(c=>pcLabelOf(c).toLowerCase()===lower || c.toLowerCase()===lower);
+  if(!code) code = Object.keys(pcRegistry).find(c=>pcLabelOf(c).toLowerCase().includes(lower));
   if(code){
-    if(!pcRegistry[code].sCode && !pcRegistry[code].pointCode && !pcRegistry[code].roadId){
+    if(!pcRegistry[code].sCode && !pcRegistry[code].pointCode && !pcRegistry[code].auditInfraId){
       const listEntry = pointCodeList.find(p=>p.code===code);
-      if(listEntry){ pcRegistry[code].sCode = listEntry.sCode; pcRegistry[code].pointCode = listEntry.pointCode; pcRegistry[code].roadId = listEntry.roadId; refreshPcTooltip(code); }
+      if(listEntry){
+        pcRegistry[code].sCode = listEntry.sCode; pcRegistry[code].pointCode = listEntry.pointCode;
+        pcRegistry[code].projectId = listEntry.projectId; pcRegistry[code].auditInfraId = listEntry.auditInfraId;
+        pcRegistry[code].roadId = listEntry.roadId; pcRegistry[code].footpathIdA = listEntry.footpathIdA; pcRegistry[code].footpathIdB = listEntry.footpathIdB;
+        refreshPcTooltip(code);
+      }
     }
     map.setView(pcRegistry[code].center, Math.max(map.getZoom(), 20));
     flashPc(code);
@@ -467,11 +511,11 @@ function searchGo(){
   }
 
   // fall back to the uploaded point-code list (not yet generated)
-  let entry = pointCodeList.find(p=>p.code.toLowerCase()===lower);
-  if(!entry) entry = pointCodeList.find(p=>p.code.toLowerCase().includes(lower));
+  let entry = pointCodeList.find(p=>p.label.toLowerCase()===lower || p.code.toLowerCase()===lower);
+  if(!entry) entry = pointCodeList.find(p=>p.label.toLowerCase().includes(lower));
   if(entry){
     map.setView(entry.latlng, Math.max(map.getZoom(), 19));
-    alert(`"${entry.code}" is in your point code list but hasn't been generated yet. Click it in the list, or click "Generate" here, to create its scale.`);
+    alert(`"${entry.label}" is in your point code list but hasn't been generated yet. Click it in the list, or click "Generate" here, to create its scale.`);
     return;
   }
 
@@ -480,10 +524,16 @@ function searchGo(){
 
 // the tool ID ("S-035-1") stays the map/list key, but the real database id (road_id)
 // is shown alongside it everywhere that ID is displayed, for clarity on which DB row it is.
+// compact label for list rows/tooltips: S-code-point_code plus audit_infra_id (the segment
+// id) -- enough to disambiguate points across corporations without cramming in every id.
+// The full set (project/audit/road/footpath ids) is shown in the current-point-code detail
+// bar instead, where there's room. See refreshCurrentPcBar().
 function pcDisplayLabel(code){
   const pc = pcRegistry[code];
-  const roadId = pc ? pc.roadId : (pointCodeList.find(p=>p.code===code)||{}).roadId;
-  return roadId !== undefined ? `${code} [ID ${roadId}]` : code;
+  const entry = pc ? null : pointCodeList.find(p=>p.code===code);
+  const label = pcLabelOf(code);
+  const auditInfraId = pc ? pc.auditInfraId : (entry && entry.auditInfraId);
+  return auditInfraId !== undefined ? `${label} [audit ${auditInfraId}]` : label;
 }
 
 // the move-handle's map label is set once at marker-creation time, so anywhere roadId
@@ -517,12 +567,16 @@ function generateFromList(idx){
 
   if(pcRegistry[entry.code]){
     // already placed -- just bring it into view and select it for the Save bar, don't regenerate
-    // backfill sCode/pointCode/roadId if this point code predates that fix (was created
-    // before these were persisted) -- otherwise it would silently keep sending blank values forever.
-    if(!pcRegistry[entry.code].sCode && !pcRegistry[entry.code].pointCode && !pcRegistry[entry.code].roadId){
+    // backfill IDs if this point code predates this ID-tracking fix (was created before
+    // these were persisted) -- otherwise it would silently keep sending blank values forever.
+    if(!pcRegistry[entry.code].sCode && !pcRegistry[entry.code].pointCode && !pcRegistry[entry.code].auditInfraId){
       pcRegistry[entry.code].sCode = entry.sCode;
       pcRegistry[entry.code].pointCode = entry.pointCode;
+      pcRegistry[entry.code].projectId = entry.projectId;
+      pcRegistry[entry.code].auditInfraId = entry.auditInfraId;
       pcRegistry[entry.code].roadId = entry.roadId;
+      pcRegistry[entry.code].footpathIdA = entry.footpathIdA;
+      pcRegistry[entry.code].footpathIdB = entry.footpathIdB;
       refreshPcTooltip(entry.code);
     }
     map.setView(pcRegistry[entry.code].center, Math.max(map.getZoom(), 19));
@@ -539,20 +593,24 @@ function generateFromList(idx){
   const result = createPointCodeAt(entry.code, entry.latlng);
   if(!result.ok){
     const msg = result.distance === null
-      ? `"${entry.code}": no road features found in the loaded network at all.`
-      : `"${entry.code}": nearest road is ${result.distance.toFixed(0)}m away, beyond the ${ROAD_SNAP_THRESHOLD_M}m snap limit. You can still place it manually on the map instead.`;
+      ? `"${entry.label}": no road features found in the loaded network at all.`
+      : `"${entry.label}": nearest road is ${result.distance.toFixed(0)}m away, beyond the ${ROAD_SNAP_THRESHOLD_M}m snap limit. You can still place it manually on the map instead.`;
     alert(msg);
     return;
   }
   entry.status = 'done';
   pcRegistry[entry.code].sCode = entry.sCode;
   pcRegistry[entry.code].pointCode = entry.pointCode;
+  pcRegistry[entry.code].projectId = entry.projectId;
+  pcRegistry[entry.code].auditInfraId = entry.auditInfraId;
   pcRegistry[entry.code].roadId = entry.roadId;
+  pcRegistry[entry.code].footpathIdA = entry.footpathIdA;
+  pcRegistry[entry.code].footpathIdB = entry.footpathIdB;
   refreshPcTooltip(entry.code);
   renderPcList();
   disarmAddMode();
   setSelectedPointCode(entry.code);
-  document.getElementById('pcHint').textContent = `"${entry.code}" placed from the point code list, snapped perpendicular to the nearest road. Drag any tick to fine-tune.`;
+  document.getElementById('pcHint').textContent = `"${entry.label}" placed from the point code list, snapped perpendicular to the nearest road. Drag any tick to fine-tune.`;
 }
 
 
@@ -643,7 +701,7 @@ async function savePc(code){
   const m = redrawPc(code);
   const rec = {pointCode: code, roadName: pc.roadName || '', ...m, medianHeight_m: pc.medianHeight_m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
     nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
-    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null, roadId: pc.roadId,
+    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null, projectId: pc.projectId, auditInfraId: pc.auditInfraId, roadId: pc.roadId, footpathIdA: pc.footpathIdA, footpathIdB: pc.footpathIdB,
     savedAt: new Date().toISOString(), locked: !!pc.locked};
   const existing = records.findIndex(r=>r.pointCode===code);
   if(existing>-1) records[existing]=rec; else records.push(rec);
@@ -661,7 +719,7 @@ function refreshRecordDisplay(code){
   const m = redrawPc(code);
   const rec = {pointCode: code, roadName: pc.roadName || '', ...m, medianHeight_m: pc.medianHeight_m, latlngs: pc.positions.map(p=>({lat:p.lat,lng:p.lng})),
     nominalLat: pc.nominalCenter.lat, nominalLng: pc.nominalCenter.lng, offsetFromNominal_m: pc.offsetFromNominal_m || 0,
-    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null, roadId: pc.roadId,
+    sCode: pc.sCode || '', rawPointCode: pc.pointCode !== undefined ? pc.pointCode : null, projectId: pc.projectId, auditInfraId: pc.auditInfraId, roadId: pc.roadId, footpathIdA: pc.footpathIdA, footpathIdB: pc.footpathIdB,
     savedAt: (records.find(r=>r.pointCode===code)||{}).savedAt, locked: !!pc.locked};
   const existing = records.findIndex(r=>r.pointCode===code);
   if(existing>-1) records[existing]=rec; else records.push(rec);
@@ -845,13 +903,13 @@ async function toggleLock(code){
     const statusEl = document.getElementById('captureAllStatus');
     const btn = document.getElementById('savebtn-'+sanitizeKey(code));
     if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
-    if(statusEl) statusEl.textContent = `Syncing "${code}" to the sheet and capturing its drone image…`;
+    if(statusEl) statusEl.textContent = `Syncing "${pcDisplayLabel(code)}" to the sheet and capturing its drone image…`;
 
     // DB save temporarily disabled -- back on the Google Sheet for now, DB work resumes later.
     // await saveToDatabase(code); // road_profile + footpath_profile rows in Postgres
     await saveEverythingToSheet(code); // one combined request: sheet row + both images, atomically
 
-    if(statusEl) statusEl.textContent = `"${code}" saved: row synced, image captured and uploaded.`;
+    if(statusEl) statusEl.textContent = `"${pcDisplayLabel(code)}" saved: row synced, image captured and uploaded.`;
     renderLog(); // resets the button out of its "Saving…" state, and shows the "✓ images saved" tag
     refreshCurrentPcBar();
   }
@@ -986,7 +1044,7 @@ function addPointCode(clickLatLng){
     code = prompt('Point code for this location:', '');
     if(code === null) return;
     code = code.trim() || ('PC-' + Date.now().toString(36).toUpperCase());
-    if(pcRegistry[code] && !confirm(`"${code}" already exists on this map. Overwrite it at this new location?`)) return;
+    if(pcRegistry[code] && !confirm(`"${pcDisplayLabel(code)}" already exists on this map. Overwrite it at this new location?`)) return;
   }
 
   const result = createPointCodeAt(code, targetLatLng);
@@ -1001,14 +1059,18 @@ function addPointCode(clickLatLng){
     matched.status = 'done';
     pcRegistry[code].sCode = matched.sCode;
     pcRegistry[code].pointCode = matched.pointCode;
+    pcRegistry[code].projectId = matched.projectId;
+    pcRegistry[code].auditInfraId = matched.auditInfraId;
     pcRegistry[code].roadId = matched.roadId;
+    pcRegistry[code].footpathIdA = matched.footpathIdA;
+    pcRegistry[code].footpathIdB = matched.footpathIdB;
     refreshPcTooltip(code);
     renderPcList();
   }
   disarmAddMode();
   setSelectedPointCode(code);
 
-  document.getElementById('pcHint').textContent = `"${code}" placed, snapped perpendicular to the nearest road${pcRegistry[code].roadName ? ' ('+pcRegistry[code].roadName+')' : ''}. Drag any tick to fine-tune.`;
+  document.getElementById('pcHint').textContent = `"${pcDisplayLabel(code)}" placed, snapped perpendicular to the nearest road${pcRegistry[code].roadName ? ' ('+pcRegistry[code].roadName+')' : ''}. Drag any tick to fine-tune.`;
 }
 
 let selectedPointCode = null;
@@ -1032,6 +1094,13 @@ function refreshCurrentPcBar(){
   bar.style.display = 'block';
   document.getElementById('currentPcLabel').textContent = pcDisplayLabel(selectedPointCode) + (pc.locked ? ' (locked)' : ' (editing)');
   document.getElementById('currentPcSaveBtn').textContent = pc.locked ? '✏️ Edit' : '💾 Save (photo + sheet)';
+  const idParts = [];
+  if(pc.projectId !== undefined) idParts.push(`project ${pc.projectId}`);
+  if(pc.auditInfraId !== undefined) idParts.push(`audit_infra_id ${pc.auditInfraId}`);
+  if(pc.roadId !== undefined) idParts.push(`road_id ${pc.roadId}`);
+  if(pc.footpathIdA !== undefined) idParts.push(`footpath_id_a ${pc.footpathIdA}`);
+  if(pc.footpathIdB !== undefined) idParts.push(`footpath_id_b ${pc.footpathIdB}`);
+  document.getElementById('currentPcIds').textContent = idParts.length ? idParts.join(' · ') : '(no ids -- manually placed, not from an uploaded list)';
   document.getElementById('currentPcMedianToggle').checked = !!pc.median;
   document.getElementById('currentPcMedianToggle').disabled = !!pc.locked;
   document.getElementById('currentPcMedianHeightRow').style.display = pc.median ? 'flex' : 'none';
@@ -1104,7 +1173,7 @@ function renderLog(){
 }
 
 async function deleteRecord(code){
-  if(!confirm(`Delete point code "${code}"?`)) return;
+  if(!confirm(`Delete point code "${pcDisplayLabel(code)}"?`)) return;
   const idx = records.findIndex(r=>r.pointCode===code);
   if(idx>-1) records.splice(idx,1);
   if(pcRegistry[code]){ map.removeLayer(pcRegistry[code].group); delete pcRegistry[code]; }
@@ -1158,7 +1227,8 @@ async function loadSaved(){
         const actionLayer = L.layerGroup().addTo(dimLayer);
         const nominalCenter = (d.nominalLat!==undefined && d.nominalLng!==undefined) ? L.latLng(d.nominalLat, d.nominalLng) : axis.center;
         pcRegistry[d.pointCode] = {center:axis.center, dir:axis.dir, offsets:axis.offsets, nominalCenter, offsetFromNominal_m: d.offsetFromNominal_m||0, group: dimLayer, visualLayer, markerLayer, actionLayer, locked: !!d.locked, roadName: d.roadName||'',
-          sCode: d.sCode || '', pointCode: (d.rawPointCode !== undefined && d.rawPointCode !== null) ? d.rawPointCode : undefined, roadId: d.roadId,
+          sCode: d.sCode || '', pointCode: (d.rawPointCode !== undefined && d.rawPointCode !== null) ? d.rawPointCode : undefined,
+          projectId: d.projectId, auditInfraId: d.auditInfraId, roadId: d.roadId, footpathIdA: d.footpathIdA, footpathIdB: d.footpathIdB,
           median: !!d.median, medianHeight_m: d.medianHeight_m};
         syncPositionsFromAxis(pcRegistry[d.pointCode]);
         createPcMarkers(d.pointCode);
@@ -1167,7 +1237,7 @@ async function loadSaved(){
         createActionIcon(d.pointCode);
         if(pcRegistry[d.pointCode].locked) setMarkersInteractive(pcRegistry[d.pointCode], false);
         redrawPc(d.pointCode);
-        records.push({pointCode:d.pointCode, roadName:d.roadName||'', footpathA_m:d.footpathA_m, carriageway_m:d.carriageway_m, footpathB_m:d.footpathB_m, row_total_m:d.row_total_m, roadWidthSideA_m:d.roadWidthSideA_m, medianWidth_m:d.medianWidth_m, roadWidthSideB_m:d.roadWidthSideB_m, median: !!d.median, medianHeight_m: d.medianHeight_m, latlngs:d.latlngs, nominalLat:nominalCenter.lat, nominalLng:nominalCenter.lng, offsetFromNominal_m:d.offsetFromNominal_m||0, sCode:d.sCode||'', rawPointCode:d.rawPointCode, roadId:d.roadId, savedAt:d.savedAt, locked: !!d.locked});
+        records.push({pointCode:d.pointCode, roadName:d.roadName||'', footpathA_m:d.footpathA_m, carriageway_m:d.carriageway_m, footpathB_m:d.footpathB_m, row_total_m:d.row_total_m, roadWidthSideA_m:d.roadWidthSideA_m, medianWidth_m:d.medianWidth_m, roadWidthSideB_m:d.roadWidthSideB_m, median: !!d.median, medianHeight_m: d.medianHeight_m, latlngs:d.latlngs, nominalLat:nominalCenter.lat, nominalLng:nominalCenter.lng, offsetFromNominal_m:d.offsetFromNominal_m||0, sCode:d.sCode||'', rawPointCode:d.rawPointCode, projectId:d.projectId, auditInfraId:d.auditInfraId, roadId:d.roadId, footpathIdA:d.footpathIdA, footpathIdB:d.footpathIdB, savedAt:d.savedAt, locked: !!d.locked});
       }catch(err){ console.error('load fail', key, err); }
     }
     try{
@@ -1331,7 +1401,7 @@ async function captureDroneImage(code){
     imageMeta[code] = {rawFilename: rawName, annotatedFilename: annName, capturedAt: new Date().toISOString(), source:'drone_wms'};
     try{ await window.storage.set('imgmeta:'+sanitizeKey(code), JSON.stringify(imageMeta[code]), false); }catch(err){ console.error('imgmeta save failed', err); }
     renderLog();
-    alert(`Captured native-resolution drone imagery for "${code}" (${cap.width}×${cap.height}px):\n${rawName}\n${annName}`);
+    alert(`Captured native-resolution drone imagery for "${pcDisplayLabel(code)}" (${cap.width}×${cap.height}px):\n${rawName}\n${annName}`);
   }catch(err){
     console.error('drone capture failed', code, err);
     if(confirm(`Could not export this directly — the server likely doesn't allow cross-origin pixel access (this is a server-side setting, not something fixable from here). Open the image in a new tab instead, so you can save it yourself with a right-click?`)){
@@ -1401,7 +1471,7 @@ async function captureCode(code){
     try{ await window.storage.set('imgmeta:'+sanitizeKey(code), JSON.stringify(imageMeta[code]), false); }catch(err){ console.error('imgmeta save failed', err); }
 
     renderLog();
-    alert(`Captured "${code}":\n${rawName}\n${annName}\n\nIf either image looks blank when you open it, that basemap likely blocked cross-origin export — try switching to Esri Satellite and re-capturing.`);
+    alert(`Captured "${pcDisplayLabel(code)}":\n${rawName}\n${annName}\n\nIf either image looks blank when you open it, that basemap likely blocked cross-origin export — try switching to Esri Satellite and re-capturing.`);
   } finally {
     map.setView(originalCenter, originalZoom, {animate:false});
     if(btn){ btn.textContent = '📷 Capture'; btn.disabled = false; }
@@ -1419,6 +1489,11 @@ function exportExcel(){
       'Point Code (tool ID)': r.pointCode,
       'S Code': pcInfo.sCode || '',
       'Point Code (number)': pcInfo.pointCode !== undefined ? pcInfo.pointCode : r.pointCode,
+      'Project ID': pcInfo.projectId !== undefined ? pcInfo.projectId : '',
+      'Audit Infra ID': pcInfo.auditInfraId !== undefined ? pcInfo.auditInfraId : '',
+      'Road ID': pcInfo.roadId !== undefined ? pcInfo.roadId : '',
+      'Footpath ID (side A)': pcInfo.footpathIdA !== undefined ? pcInfo.footpathIdA : '',
+      'Footpath ID (side B)': pcInfo.footpathIdB !== undefined ? pcInfo.footpathIdB : '',
       'Footpath A width (m)': +r.footpathA_m.toFixed(2),
       'Carriageway width (m)': +r.carriageway_m.toFixed(2),
       'Footpath B width (m)': +r.footpathB_m.toFixed(2),
@@ -1491,24 +1566,38 @@ async function saveEverythingToSheet(code){
     console.error('drone image capture failed, saving sheet row without images', code, err);
   }
 
+  // sent as separate road/footpath_a/footpath_b/row sub-objects since they land in 3
+  // different sheet tabs -- see Code.gs's handleFullSave(). s_code/point_code repeat in
+  // each sub-object so every sheet row can be read on its own without cross-referencing.
+  const sCode = pc.sCode || '';
+  const pointCode = pc.pointCode !== undefined ? pc.pointCode : code;
+  const ts = new Date().toISOString();
+
   const payload = {
     type: 'full_save',
-    s_code: pc.sCode || '',
-    point_code: pc.pointCode !== undefined ? pc.pointCode : code,
-    road_id: pc.roadId !== undefined ? pc.roadId : '',
-    latitude_longitude: `${pc.center.lat.toFixed(6)}, ${pc.center.lng.toFixed(6)}`,
-    footpath_side_a: Number(rec.footpathA_m.toFixed(2)),
-    road_width: rec.median ? '' : Number(rec.carriageway_m.toFixed(2)),
-    carriage_way: Number(rec.carriageway_m.toFixed(2)), // always the full road width, median or not
-    footpath_side_b: Number(rec.footpathB_m.toFixed(2)),
-    row_total: Number(rec.row_total_m.toFixed(2)),
-    offset_distance: Number((rec.offsetFromNominal_m||0).toFixed(1)),
-    timestamp: new Date().toISOString(),
-    median: !!rec.median,
-    road_width_side_a: rec.median ? Number(rec.roadWidthSideA_m.toFixed(2)) : '',
-    median_width: rec.median ? Number(rec.medianWidth_m.toFixed(2)) : '',
-    median_height: (rec.median && pc.medianHeight_m !== undefined) ? Number(pc.medianHeight_m) : '',
-    road_width_side_b: rec.median ? Number(rec.roadWidthSideB_m.toFixed(2)) : '',
+    road: {
+      s_code: sCode, point_code: pointCode, project_id: pc.projectId, audit_infra_id: pc.auditInfraId,
+      road_id: pc.roadId, latitude_longitude: `${pc.center.lat.toFixed(6)}, ${pc.center.lng.toFixed(6)}`,
+      median: !!rec.median,
+      road_width: rec.median ? '' : Number(rec.carriageway_m.toFixed(2)),
+      road_width_side_a: rec.median ? Number(rec.roadWidthSideA_m.toFixed(2)) : '',
+      median_width: rec.median ? Number(rec.medianWidth_m.toFixed(2)) : '',
+      median_height: (rec.median && pc.medianHeight_m !== undefined) ? Number(pc.medianHeight_m) : '',
+      road_width_side_b: rec.median ? Number(rec.roadWidthSideB_m.toFixed(2)) : '',
+      timestamp: ts
+    },
+    footpath_a: {
+      s_code: sCode, point_code: pointCode, project_id: pc.projectId, audit_infra_id: pc.auditInfraId,
+      footpath_id: pc.footpathIdA, side: 'A', footpath_width_m: Number(rec.footpathA_m.toFixed(2)), timestamp: ts
+    },
+    footpath_b: {
+      s_code: sCode, point_code: pointCode, project_id: pc.projectId, audit_infra_id: pc.auditInfraId,
+      footpath_id: pc.footpathIdB, side: 'B', footpath_width_m: Number(rec.footpathB_m.toFixed(2)), timestamp: ts
+    },
+    row: {
+      audit_infra_id: pc.auditInfraId, s_code: sCode, point_code: pointCode,
+      row_total: Number(rec.row_total_m.toFixed(2)), carriageway: Number(rec.carriageway_m.toFixed(2))
+    },
     raw_filename: rawName, annotated_filename: annName,
     raw_base64: rawBase64, annotated_base64: annBase64
   };
@@ -1604,20 +1693,20 @@ async function saveToDatabase(code){
   if(!pc) return {ok:false};
   if(!dbBackendUrl){ console.warn('no database backend URL configured -- skipping DB save for', code); return {ok:false}; }
   if(!pc.roadId){
-    alert(`"${code}" has no road_id (that's only present on point codes placed from an uploaded list) -- can't save to the database. Manually-typed point codes aren't supported for database save.`);
+    alert(`"${pcDisplayLabel(code)}" has no road_id (that's only present on point codes placed from an uploaded list) -- can't save to the database. Manually-typed point codes aren't supported for database save.`);
     return {ok:false};
   }
   const statusEl = document.getElementById('dbSyncStatus');
-  if(statusEl) statusEl.textContent = `Saving "${code}" to the database…`;
+  if(statusEl) statusEl.textContent = `Saving "${pcDisplayLabel(code)}" to the database…`;
   try{
     await postToDb('/api/road', buildRoadPayload(code));
     for(const fp of buildFootpathPayloads(code)) await postToDb('/api/footpath', fp);
-    if(statusEl) statusEl.textContent = `"${code}" saved to the database (road + both footpath sides).`;
+    if(statusEl) statusEl.textContent = `"${pcDisplayLabel(code)}" saved to the database (road + both footpath sides).`;
     return {ok:true};
   }catch(err){
     console.error('database save failed', code, err);
-    if(statusEl) statusEl.textContent = `Database save FAILED for "${code}": ${err.message}`;
-    alert(`Database save failed for "${code}": ${err.message}`);
+    if(statusEl) statusEl.textContent = `Database save FAILED for "${pcDisplayLabel(code)}": ${err.message}`;
+    alert(`Database save failed for "${pcDisplayLabel(code)}": ${err.message}`);
     return {ok:false};
   }
 }
@@ -1648,7 +1737,8 @@ async function uploadImageToDrive(canvas, filename, code, imageKind){
   const payload = {
     type:'image', filename, base64, image_kind: imageKind,
     point_code: pc && pc.pointCode !== undefined ? pc.pointCode : code,
-    s_code: (pc && pc.sCode) || ''
+    s_code: (pc && pc.sCode) || '',
+    road_id: pc && pc.roadId
   };
   showOutgoingPayload(payload);
   try{
@@ -1667,18 +1757,26 @@ function exportData(fmt){
   if(records.length===0){ alert('No point codes saved yet.'); return; }
   let content, mime, ext;
   if(fmt==='geojson'){
-    const features = records.map(r=>({
-      type:'Feature',
-      properties:{point_code:r.pointCode, road_name:r.roadName, footpathA_m:r.footpathA_m, carriageway_m:r.carriageway_m, footpathB_m:r.footpathB_m, row_total_m:r.row_total_m, offset_from_nominal_m:r.offsetFromNominal_m||0, nominal_lat:r.nominalLat, nominal_lng:r.nominalLng, saved_at:r.savedAt||''},
-      geometry:{type:'LineString', coordinates:r.latlngs.map(p=>[p.lng,p.lat])}
-    }));
+    const features = records.map(r=>{
+      const pcInfo = pcRegistry[r.pointCode] || {};
+      return {
+        type:'Feature',
+        properties:{point_code:pcInfo.pointCode!==undefined?pcInfo.pointCode:r.pointCode, s_code:pcInfo.sCode||'',
+          project_id:pcInfo.projectId, audit_infra_id:pcInfo.auditInfraId, road_id:pcInfo.roadId,
+          footpath_id_a:pcInfo.footpathIdA, footpath_id_b:pcInfo.footpathIdB,
+          road_name:r.roadName, footpathA_m:r.footpathA_m, carriageway_m:r.carriageway_m, footpathB_m:r.footpathB_m,
+          row_total_m:r.row_total_m, offset_from_nominal_m:r.offsetFromNominal_m||0, nominal_lat:r.nominalLat, nominal_lng:r.nominalLng, saved_at:r.savedAt||''},
+        geometry:{type:'LineString', coordinates:r.latlngs.map(p=>[p.lng,p.lat])}
+      };
+    });
     content = JSON.stringify({type:'FeatureCollection', features}, null, 2);
     mime='application/geo+json'; ext='geojson';
   } else {
-    const rows = ['point_code,footpathA_m,carriageway_m,footpathB_m,row_total_m,road_name,offset_from_nominal_m,nominal_lat,nominal_lng,lat_buildingA,lng_buildingA,lat_buildingB,lng_buildingB'];
+    const rows = ['tool_id,s_code,project_id,audit_infra_id,road_id,footpath_id_a,footpath_id_b,footpathA_m,carriageway_m,footpathB_m,row_total_m,road_name,offset_from_nominal_m,nominal_lat,nominal_lng,lat_buildingA,lng_buildingA,lat_buildingB,lng_buildingB'];
     records.forEach(r=>{
-      const p1=r.latlngs[0], p2=r.latlngs[3];
-      rows.push([`"${r.pointCode.replace(/"/g,'""')}"`, r.footpathA_m.toFixed(3), r.carriageway_m.toFixed(3), r.footpathB_m.toFixed(3), r.row_total_m.toFixed(3), `"${(r.roadName||'').replace(/"/g,'""')}"`, (r.offsetFromNominal_m||0).toFixed(1), r.nominalLat??'', r.nominalLng??'', p1.lat, p1.lng, p2.lat, p2.lng].join(','));
+      const pcInfo = pcRegistry[r.pointCode] || {};
+      const p1=r.latlngs[0], p2=r.latlngs[r.latlngs.length-1]; // building edge A / B -- NOT a fixed index, since median points have 6 markers not 4
+      rows.push([`"${r.pointCode.replace(/"/g,'""')}"`, `"${(pcInfo.sCode||'').replace(/"/g,'""')}"`, pcInfo.projectId??'', pcInfo.auditInfraId??'', pcInfo.roadId??'', pcInfo.footpathIdA??'', pcInfo.footpathIdB??'', r.footpathA_m.toFixed(3), r.carriageway_m.toFixed(3), r.footpathB_m.toFixed(3), r.row_total_m.toFixed(3), `"${(r.roadName||'').replace(/"/g,'""')}"`, (r.offsetFromNominal_m||0).toFixed(1), r.nominalLat??'', r.nominalLng??'', p1.lat, p1.lng, p2.lat, p2.lng].join(','));
     });
     content = rows.join('\n');
     mime='text/csv'; ext='csv';

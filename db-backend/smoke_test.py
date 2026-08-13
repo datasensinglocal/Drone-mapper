@@ -20,7 +20,7 @@ TEST_POINT_CODE = 999901    # unlikely to collide with real survey data
 
 print("-- POST /api/road --")
 resp = client.post("/api/road", json={
-    "audit_infra_id": TEST_AUDIT_INFRA_ID, "point_code": TEST_POINT_CODE, "median": False,
+    "road_id": TEST_AUDIT_INFRA_ID, "point_code": TEST_POINT_CODE, "median": False,
     "road_width": 7.5, "geometry_coords": [[77.65, 12.96], [77.6501, 12.9601]],
     "data_collection_timestamp": "2026-08-10T00:00:00Z",
 }, headers=AUTH)
@@ -28,7 +28,7 @@ print(resp.status_code, resp.get_json())
 
 print("\n-- POST /api/footpath (side A) --")
 resp = client.post("/api/footpath", json={
-    "audit_infra_id": TEST_AUDIT_INFRA_ID, "point_code": TEST_POINT_CODE, "side": "A",
+    "road_id": TEST_AUDIT_INFRA_ID, "point_code": TEST_POINT_CODE, "side": "A",
     "footpath_width_m": 1.8, "geometry_coords": [[77.65, 12.96], [77.6501, 12.9601]],
     "data_collection_timestamp": "2026-08-10T00:00:00Z",
 }, headers=AUTH)
@@ -36,7 +36,7 @@ print(resp.status_code, resp.get_json())
 
 print("\n-- re-POST /api/road (should update, not duplicate) --")
 resp = client.post("/api/road", json={
-    "audit_infra_id": TEST_AUDIT_INFRA_ID, "point_code": TEST_POINT_CODE, "median": True,
+    "road_id": TEST_AUDIT_INFRA_ID, "point_code": TEST_POINT_CODE, "median": True,
     "road_width_side_a": 3.0, "median_width": 1.0, "median_height": 0.2, "road_width_side_b": 3.0,
     "geometry_coords": [[77.65, 12.96], [77.6501, 12.9601]],
     "data_collection_timestamp": "2026-08-10T00:01:00Z",
