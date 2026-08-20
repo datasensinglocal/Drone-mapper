@@ -50,7 +50,8 @@
   .dim-label{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;
     color:#fff;font-weight:700;font-size:12.5px;font-family:'Segoe UI',system-ui,sans-serif;
     text-shadow:-1.5px -1.5px 2px #000,1.5px -1.5px 2px #000,-1.5px 1.5px 2px #000,1.5px 1.5px 2px #000,0 0 4px #000;
-    pointer-events:none;transition:none!important;}
+    pointer-events:none;transition:none!important;
+    width:110px!important;text-align:center;overflow:visible;white-space:nowrap;}
   .dim-label::before{display:none!important;}
   .pc-label{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;
     color:#e0453a;font-weight:700;font-size:12px;font-family:'Segoe UI',system-ui,sans-serif;
@@ -61,21 +62,23 @@
     border-radius:4px!important;padding:3px 6px!important;font-size:10px;font-weight:700;
     color:#fff!important;font-family:'Segoe UI',system-ui,sans-serif;
     box-shadow:0 2px 8px rgba(0,0,0,.55);pointer-events:none;opacity:1!important;
-    text-align:center;white-space:nowrap;transition:none!important;}
+    text-align:center;white-space:nowrap;transition:none!important;
+    width:64px!important;overflow:visible;}
   .compare-box::before{display:none!important;}
   .row-total-box{background:#fff!important;border:2px solid #000!important;
     border-radius:5px!important;padding:0!important;font-size:11px;font-weight:700;
     font-family:'Segoe UI',system-ui,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.55);
     pointer-events:none;opacity:1!important;white-space:nowrap;display:inline-flex!important;
     align-items:stretch;overflow:hidden;transition:none!important;}
-  .row-total-box .row-total-meas{background:#fff;color:#000;padding:4px 10px;}
-  .row-total-box .row-total-csv{background:var(--accent);color:#fff;padding:4px 10px;}
+  .row-total-box .row-total-meas{background:#fff;color:#000;padding:4px 10px;width:80px;text-align:center;box-sizing:border-box;}
+  .row-total-box .row-total-csv{background:var(--accent);color:#fff;padding:4px 10px;width:80px;text-align:center;box-sizing:border-box;}
   .row-total-box .row-total-divider{width:2px;background:#000;}
   .row-total-box::before{display:none!important;}
-  .pc-tick-hit{position:absolute;left:50%;top:50%;width:22px;height:22px;margin-left:-11px;margin-top:-11px;border-radius:50%;cursor:grab;}
+  .pc-tick-hit{position:absolute;left:50%;top:50%;width:30px;height:64px;margin-left:-15px;margin-top:-32px;
+    border-radius:15px;cursor:grab;}
   .pc-tick-hit:active{cursor:grabbing;}
   .pc-tick-bar{position:absolute;left:50%;top:50%;width:4px;height:72px;margin-left:-2px;margin-top:-36px;
-    border:1px solid #000;border-radius:2px;box-shadow:0 0 3px rgba(0,0,0,.7);pointer-events:none;}
+    border:none;border-radius:1px;box-shadow:0 0 0 0.5px rgba(0,0,0,.9), 0 0 3px rgba(0,0,0,.7);pointer-events:none;}
   .pc-rotate-hit{width:26px;height:26px;border-radius:50%;background:#7ab8e0;border:2px solid #000;
     box-shadow:0 0 4px rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;
     cursor:grab;}
@@ -387,7 +390,7 @@ function pcLabelFor(i, n){
 }
 function pcColorFor(i, n){
   if(i===0 || i===n-1) return '#e0a458'; // building edges
-  if(i===1 || i===n-2) return '#5fbf8a'; // footpath edges
+  if(i===1 || i===n-2) return '#e0453a'; // road edges
   return '#6a9fd8'; // median edges
 }
 const pcRegistry = {}; // pointCode -> {positions:[LatLng x4], markers:[], group, roadName}
@@ -867,7 +870,7 @@ function makePcIcon(color, angleDeg, width){
   return L.divIcon({
     className:'',
     html:`<div style="position:relative;width:26px;height:26px;">
-      <div class="pc-tick-hit"></div>
+      <div class="pc-tick-hit" style="transform:rotate(${angleDeg}deg);"></div>
       <div class="pc-tick-bar" style="background:${color};width:${width}px;margin-left:-${half}px;transform:rotate(${angleDeg}deg);"></div>
     </div>`,
     iconSize:[26,26], iconAnchor:[13,13]
@@ -896,7 +899,7 @@ function updateTickAngles(code){
 }
 
 function drawHaloLine(points, group, weight){
-  L.polyline(points, {color:'#000', weight: weight+2.5, opacity:0.4}).addTo(group);
+  L.polyline(points, {color:'#000', weight: weight+1.25, opacity:0.4}).addTo(group);
   L.polyline(points, {color:'#fff', weight: weight, opacity:0.95}).addTo(group);
 }
 function midpoint(a,b){ return L.latLng((a.lat+b.lat)/2, (a.lng+b.lng)/2); }
@@ -914,10 +917,11 @@ function redrawPc(code){
   const positions = pc.positions;
   const n = positions.length;
   const pA = positions[0], pFA = positions[1], pFB = positions[n-2], pB = positions[n-1];
-  drawHaloLine(positions, pc._haloLayer, 2.2);
+  drawHaloLine(positions, pc._haloLayer, 1.1);
   L.polyline(positions, {opacity:0, weight:16}).addTo(pc._haloLayer).on('click', ()=>setSelectedPointCode(code)); // generous invisible click target
 
-  const ref = uploadMode === 'validate' ? uploadedReference[code] : null;
+  const validateMode = uploadMode === 'validate';
+  const ref = validateMode ? uploadedReference[code] : null;
 
   const fA = pA.distanceTo(pFA), fB = pFB.distanceTo(pB), row = pA.distanceTo(pB);
   const labels = [{pos: midpoint(pA,pFA), text: `Ft A · ${fA.toFixed(1)}m`, up: ref && ref.footpathA_m, meas: fA}];
@@ -933,13 +937,31 @@ function redrawPc(code){
       roadWidthSideA_m:rwA, medianWidth_m:mw, roadWidthSideB_m:rwB, carriageway_m:rwA+mw+rwB};
   } else {
     const cw = pFA.distanceTo(pFB);
-    labels.push({pos: midpoint(pFA,pFB), text: `R · ${cw.toFixed(1)}m`, up: ref && ref.road_width, meas: cw});
+    // the CSV's OWN median flag decides where its road-width value lives -- independent of
+    // whether the tool's median checkbox happens to be ticked right now. If the CSV recorded
+    // a median (so its road_width column is blank, only the split values are filled), the
+    // total is still there, just split -- sum the three parts so it's still comparable
+    // against this single measured segment instead of silently showing nothing.
+    let roadUp = ref && ref.road_width;
+    if(roadUp === undefined && ref && ref.median &&
+       ref.road_width_side_a !== undefined && ref.median_width !== undefined && ref.road_width_side_b !== undefined){
+      roadUp = ref.road_width_side_a + ref.median_width + ref.road_width_side_b;
+    }
+    labels.push({pos: midpoint(pFA,pFB), text: `R · ${cw.toFixed(1)}m`, up: roadUp, meas: cw});
     result = {footpathA_m:fA, footpathB_m:fB, row_total_m:row, median:false, carriageway_m:cw,
       roadWidthSideA_m:undefined, medianWidth_m:undefined, roadWidthSideB_m:undefined};
   }
   labels.push({pos: midpoint(pFB,pB), text: `Ft B · ${fB.toFixed(1)}m`, up: ref && ref.footpathB_m, meas: fB});
 
   const fmt = v => (v===undefined || v===null || Number.isNaN(v)) ? '—' : Number(v).toFixed(2);
+
+  // labels/boxes are offset perpendicular to the LINE's own on-screen angle, not just straight
+  // up/down in pixels -- otherwise on a tilted line each one sits at a different perpendicular
+  // distance from the line depending on where along it it falls, looking increasingly
+  // misaligned/zigzagged the more the line is rotated instead of tracking parallel to it.
+  const axisRad = axisAngleDeg(pA, pB) * Math.PI/180;
+  const sinA = Math.sin(axisRad), cosA = Math.cos(axisRad);
+  const perpOffset = px => [px*sinA, -px*cosA]; // positive px = toward the "above the line" side
 
   if(!pc._viz) pc._viz = {dimMarkers: [], cmpMarkers: []};
   const viz = pc._viz;
@@ -957,19 +979,20 @@ function redrawPc(code){
     if(dm){ dm.setLatLng(pos); dm.setTooltipContent(text); }
     else{
       dm = L.circleMarker(pos, {radius:0, opacity:0, fillOpacity:0}).addTo(pc.visualLayer)
-        .bindTooltip(text, {permanent:true, direction:'top', offset:[0,-6], className:'dim-label'});
+        .bindTooltip(text, {permanent:true, direction:'top', offset:perpOffset(6), className:'dim-label'});
       viz.dimMarkers[i] = dm;
     }
     // its own small reference-value box, stacked just below, vertically aligned under it.
     // No label prefix -- the orange color + position below the line already identify it as
     // the uploaded reference; the measured value stays on the line above, not repeated here.
+    // Never shown outside Validate mode, even if a CSV happened to have width data in it.
     let cm = viz.cmpMarkers[i];
-    if(up !== undefined){
+    if(validateMode && up !== undefined){
       const html = `${fmt(up)}m`;
       if(cm){ cm.setLatLng(pos); cm.setTooltipContent(html); }
       else{
         cm = L.circleMarker(pos, {radius:0, opacity:0, fillOpacity:0}).addTo(pc.visualLayer)
-          .bindTooltip(html, {permanent:true, direction:'bottom', offset:[0,9], className:'compare-box'});
+          .bindTooltip(html, {permanent:true, direction:'bottom', offset:perpOffset(-9), className:'compare-box'});
         viz.cmpMarkers[i] = cm;
       }
     } else if(cm){
@@ -981,7 +1004,8 @@ function redrawPc(code){
   // total RoW box, above the line at its overall center: measured (footpaths + road/median,
   // always known) stacked over the CSV total (only shown when every needed CSV component --
   // both footpaths, plus road_width or the three median parts -- is actually present).
-  if(ref){
+  // Never shown outside Validate mode, even if a CSV happened to have width data in it.
+  if(validateMode && ref){
     const roadPartUp = ref.median
       ? ((ref.road_width_side_a!==undefined && ref.median_width!==undefined && ref.road_width_side_b!==undefined)
           ? ref.road_width_side_a + ref.median_width + ref.road_width_side_b : undefined)
@@ -993,7 +1017,7 @@ function redrawPc(code){
     if(pc._totalMarker){ pc._totalMarker.setLatLng(center); pc._totalMarker.setTooltipContent(totalHtml); }
     else{
       pc._totalMarker = L.circleMarker(center, {radius:0, opacity:0, fillOpacity:0}).addTo(pc.visualLayer)
-        .bindTooltip(totalHtml, {permanent:true, direction:'top', offset:[0,-34], className:'row-total-box'});
+        .bindTooltip(totalHtml, {permanent:true, direction:'top', offset:perpOffset(34), className:'row-total-box'});
     }
   } else if(pc._totalMarker){
     pc.visualLayer.removeLayer(pc._totalMarker);
@@ -1242,7 +1266,7 @@ function createPcMarkers(code){
   const n = pc.positions.length;
   const angle = axisAngleDeg(pc.positions[0], pc.positions[n-1]);
   pc.markers = pc.positions.map((pos,i)=>{
-    const tickWidth = (i===0 || i===n-1) ? 4 : 2; // building edges are twice as wide as the rest -- kept thin so they don't obscure the drone photo underneath; the invisible .pc-tick-hit circle around each one is still 22px, so they stay just as easy to grab
+    const tickWidth = 2; // kept thin so they don't obscure the drone photo underneath; the invisible .pc-tick-hit circle around each one is still 22px, so they stay just as easy to grab
     const marker = L.marker(pos, {icon: makePcIcon(pcColorFor(i,n), angle, tickWidth), draggable:true, bubblingMouseEvents:false})
       .addTo(pc.markerLayer)
       .bindTooltip(pcLabelFor(i,n), {direction:'top', offset:[0,-8]});
